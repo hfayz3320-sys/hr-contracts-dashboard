@@ -1,6 +1,6 @@
 import dayjs from 'dayjs';
-import customParseFormat from 'dayjs/plugin/customParseFormat';
-import { expectedSchema, nationalityNormalization, schemaAliases } from './schema';
+import customParseFormat from 'dayjs/plugin/customParseFormat.js';
+import { expectedSchema, nationalityNormalization, schemaAliases, schemaAliasesArabic } from './schema';
 
 dayjs.extend(customParseFormat);
 
@@ -27,8 +27,13 @@ function normalizeKey(input) {
 }
 
 function canonicalColumnName(col) {
-  const normalized = normalizeKey(col);
-  return schemaAliases[normalized] || String(col || '').trim();
+  const colStr = String(col || '').trim();
+  // Arabic headers survive normalizeKey as "" — check raw Arabic lookup first.
+  if (schemaAliasesArabic[colStr]) {
+    return schemaAliasesArabic[colStr];
+  }
+  const normalized = normalizeKey(colStr);
+  return schemaAliases[normalized] || colStr;
 }
 
 function parseExcelDateNumber(value) {
@@ -125,6 +130,35 @@ export function normalizeProfession(value) {
   return String(value || '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function normalizeIdentityNumber(value) {
+  if (value === null || value === undefined || value === '') {
+    return '';
+  }
+  // Excel may give us a JS number (2558797532) — convert without scientific notation.
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.round(value).toString() : '';
+  }
+  // String: strip whitespace and non-digit chars (spaces, dashes, etc.)
+  return String(value).trim().replace(/[^0-9]/g, '');
+}
+
+export function validateIdentityNumber(value) {
+  const id = normalizeIdentityNumber(value);
+  if (!id) {
+    return { valid: false, type: null, reason: 'missing' };
+  }
+  if (id.length !== 10) {
+    return { valid: false, type: null, reason: `length is ${id.length}, expected 10` };
+  }
+  if (id.startsWith('1')) {
+    return { valid: true, type: 'Saudi', reason: null };
+  }
+  if (id.startsWith('2')) {
+    return { valid: true, type: 'Iqama', reason: null };
+  }
+  return { valid: false, type: null, reason: `starts with ${id[0]}, expected 1 (Saudi) or 2 (Iqama)` };
 }
 
 function normalizePhone(value) {
@@ -267,6 +301,7 @@ export function cleanDataset(rawRows) {
     cleaned.Profession = normalizeProfession(cleaned.Profession);
     cleaned.Nationality = normalizeNationality(cleaned.Nationality);
     cleaned.EmployeeNumber = String(cleaned.EmployeeNumber || '').trim();
+    cleaned.IdentityNumber = normalizeIdentityNumber(cleaned.IdentityNumber);
     cleaned.ContractNumber = String(cleaned.ContractNumber || '').trim();
     cleaned.SourceFile = String(cleaned.SourceFile || '').trim();
 
@@ -345,6 +380,15 @@ export function cleanDataset(rawRows) {
 
     if (!cleaned.Name) {
       issues.push(createIssue(rowIndex, cleaned.EmployeeNumber, 'NAME_MISSING', 'Critical', 'اسم الموظف مفقود', 'Name'));
+    }
+
+    if (!cleaned.IdentityNumber) {
+      issues.push(createIssue(rowIndex, cleaned.EmployeeNumber, 'IDENTITY_MISSING', 'Critical', 'رقم الهوية / الإقامة مفقود', 'IdentityNumber'));
+    } else {
+      const idCheck = validateIdentityNumber(cleaned.IdentityNumber);
+      if (!idCheck.valid) {
+        issues.push(createIssue(rowIndex, cleaned.EmployeeNumber, 'IDENTITY_INVALID', 'Critical', `رقم الهوية غير صالح: ${idCheck.reason}`, 'IdentityNumber'));
+      }
     }
 
     cleanedRows.push(cleaned);

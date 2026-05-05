@@ -118,9 +118,9 @@ export default function DataQualityPage({ lang, t, rows, issues, importSummary }
         <button className="btn" type="button" onClick={exportQualityCsv}>{t(lang, 'qualityExport')}</button>
       </div>
 
-      <div className="chart-card" style={{ marginTop: 10 }}>
+      <div className="chart-card compact-chart-card" style={{ marginTop: 10 }}>
         <h3>{lang === 'ar' ? 'جدول مشاكل الجودة' : 'Quality Issues'}</h3>
-        <div className="table-wrap" style={{ maxHeight: 360 }}>
+        <div className="table-wrap" style={{ maxHeight: 'min(360px, 44vh)' }}>
           <table className="table">
             <thead>
               <tr>

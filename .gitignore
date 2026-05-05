@@ -1,1 +1,59 @@
 node_modules
+
+# ─────────────────────────────────────────────────────────────────────────
+# PII / real-data exclusions — DO NOT REMOVE
+# These directories hold real employee contracts (PDFs), the HR Excel
+# export, and extraction outputs containing IdentityNumbers, names, IBANs,
+# salaries, emails and mobiles. They must NEVER be tracked or shipped to
+# any public deployment (Cloudflare Pages serves dist/ byte-for-byte).
+# ─────────────────────────────────────────────────────────────────────────
+
+# Real employee contract PDFs (Vite copies public/ → dist/)
+public/data/contracts/
+public/data/contracts-manifest.json
+dist/data/contracts/
+dist/data/contracts-manifest.json
+
+# Real Employee Master + Bupa medical xlsx files served via /public
+# (sample.xlsx is currently TRACKED and being served by Cloudflare —
+#  must also be removed from the working tree so the next push strips it)
+public/data/sample.xlsx
+public/data/popa.xlsx
+dist/data/sample.xlsx
+dist/data/popa.xlsx
+
+# Pre-existing PII at non-served paths — also tracked at 8bc29f3.
+# These are NOT publicly served by Cloudflare (outside dist/) but the
+# next commit removes them from the tracked tree so re-deploy can't
+# accidentally pull them. NOTE: git history at 8bc29f3 still contains
+# these blobs — a complete purge requires history rewrite + force push.
+server/storage/pdfs/
+server/storage/latest-dataset.json
+Cleaned.xlsx
+employee_master_ENfirst.xlsx
+employee_master_ENfirst_filled.xlsx
+
+# Extraction outputs (contain real IDs / IBANs / salaries / emails / mobiles)
+_contract_lab/outputs/
+
+# Real Employee Master Excel input
+_contract_lab/employee_master_import_test/inputs/
+
+# Temporary base64-encoded test data
+*_b64.txt
+
+# Browser-side test fixtures (copied into public/ during validation only)
+__test_*.xlsx
+__test_*.json
+
+# ─────────────────────────────────────────────────────────────────────────
+# Transient / build artefacts
+# ─────────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+.playwright-cli/
+api-server.log
+vite-dev.log
+vite-proof.log
+vite-proof.err
+tmp/

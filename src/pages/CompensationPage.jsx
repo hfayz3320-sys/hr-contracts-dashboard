@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatCurrency, formatNumber } from '../utils/format';
+import { createAxisTickRenderer, getCategoryAxisWidth } from '../utils/charting.jsx';
 
 const barColors = ['#2f968d', '#1f7a7a', '#4fb0a6', '#7cc9bf', '#247770', '#59b5ad'];
 
@@ -65,6 +66,34 @@ export default function CompensationPage({ rows, lang }) {
     return Object.entries(bands).map(([name, value]) => ({ name, value }));
   }, [rows]);
 
+  const salaryAxisWidth = useMemo(
+    () => getCategoryAxisWidth(topSalaries, 'name', { min: 150, max: 260 }),
+    [topSalaries]
+  );
+
+  const salaryNameTick = useMemo(
+    () =>
+      createAxisTickRenderer({
+        maxLength: lang === 'ar' ? 14 : 18,
+        textAnchor: 'end',
+        dx: -6,
+        dy: 4,
+        direction: lang === 'ar' ? 'rtl' : 'ltr',
+      }),
+    [lang]
+  );
+
+  const professionTick = useMemo(
+    () =>
+      createAxisTickRenderer({
+        maxLength: lang === 'ar' ? 12 : 16,
+        textAnchor: 'middle',
+        dy: 16,
+        direction: lang === 'ar' ? 'rtl' : 'ltr',
+      }),
+    [lang]
+  );
+
   return (
     <div className="page-card">
       <div className="page-header">
@@ -100,10 +129,20 @@ export default function CompensationPage({ rows, lang }) {
         <div className="chart-card">
           <h3>{lang === 'ar' ? 'أعلى 10 موظفين راتبًا' : 'Top 10 Salaries'}</h3>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={topSalaries} layout="vertical" margin={{ left: 8, right: 10 }}>
+            <BarChart
+              data={topSalaries}
+              layout="vertical"
+              margin={{ top: 8, right: 20, left: 10, bottom: 8 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2eded" />
               <XAxis type="number" />
-              <YAxis dataKey="name" type="category" width={130} />
+              <YAxis
+                dataKey="name"
+                type="category"
+                width={salaryAxisWidth}
+                tick={salaryNameTick}
+                tickMargin={8}
+              />
               <Tooltip formatter={(v) => formatCurrency(v)} />
               <Bar dataKey="gross" radius={[8, 8, 8, 8]}>
                 {topSalaries.map((item, idx) => (
@@ -117,9 +156,9 @@ export default function CompensationPage({ rows, lang }) {
         <div className="chart-card">
           <h3>{lang === 'ar' ? 'الراتب الأساسي مقابل البدلات حسب المهنة' : 'Basic vs Allowances by Profession'}</h3>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={byProfession}>
+            <BarChart data={byProfession} margin={{ top: 8, right: 16, left: 12, bottom: 34 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2eded" />
-              <XAxis dataKey="profession" />
+              <XAxis dataKey="profession" tick={professionTick} interval={0} height={56} />
               <YAxis />
               <Tooltip formatter={(v) => formatCurrency(v)} />
               <Legend />
@@ -134,9 +173,9 @@ export default function CompensationPage({ rows, lang }) {
         <div className="chart-card">
           <h3>{lang === 'ar' ? 'توزيع الرواتب حسب الشرائح' : 'Salary Bands Distribution'}</h3>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={salaryBands}>
+            <BarChart data={salaryBands} margin={{ top: 8, right: 16, left: 12, bottom: 20 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2eded" />
-              <XAxis dataKey="name" />
+              <XAxis dataKey="name" tickMargin={8} />
               <YAxis allowDecimals={false} />
               <Tooltip />
               <Bar dataKey="value" fill="#2f968d" radius={[8, 8, 0, 0]} />

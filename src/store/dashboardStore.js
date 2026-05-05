@@ -2,7 +2,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 const defaultFilters = {
+  employeeNumber: '',
+  employeeName: '',
   nationality: 'all',
+  jobTitle: 'all',
+  employmentStatus: 'all',
+  contractExpiry: 'all',
   profession: 'all',
   contractStatus: 'all',
   startFrom: '',
@@ -146,6 +151,8 @@ export const useDashboardStore = create(
       partialize: (state) => ({
         language: state.language,
         activePage: state.activePage,
+        filtersDraft: state.filtersDraft,
+        filtersApplied: state.filtersApplied,
         visibleColumns: state.visibleColumns,
         sortKey: state.sortKey,
         sortDirection: state.sortDirection,

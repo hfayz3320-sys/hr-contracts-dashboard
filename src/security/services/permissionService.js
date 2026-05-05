@@ -1,0 +1,33 @@
+import {
+  canAssignRoleIds,
+  canManageRoles,
+  canManageTargetUser,
+  canManageUsers,
+  getAccessibleModules,
+  getAccessiblePages,
+  getDefaultRouteForAccess,
+  getManageableRoleIds,
+  getManageableRolesForActor,
+  getVisibleUsersForActor,
+  hasModuleAccess,
+  hasPagePermission,
+  normalizePermissionSet,
+  resolveUserPermissions,
+} from '../utils/permissions';
+
+export const permissionService = {
+  normalizePermissionSet,
+  resolveUserAccess: resolveUserPermissions,
+  canAccessModule: hasModuleAccess,
+  canAccessPage: hasPagePermission,
+  getAccessiblePages,
+  getAccessibleModules,
+  getDefaultRoute: getDefaultRouteForAccess,
+  canManageUsers,
+  canManageRoles,
+  getManageableRoleIds,
+  getManageableRolesForActor,
+  getVisibleUsersForActor,
+  canAssignRoleIds,
+  canManageTargetUser,
+};

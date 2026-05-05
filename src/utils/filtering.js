@@ -14,15 +14,80 @@ function between(dateValue, from, to) {
   return fromOk && toOk;
 }
 
+function normalize(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function matchesEmployeeNumber(row, filterValue) {
+  const query = normalize(filterValue);
+  if (!query) {
+    return true;
+  }
+
+  const employeeNumber = normalize(row.EmployeeNumber);
+  return employeeNumber === query || employeeNumber.startsWith(query);
+}
+
+function matchesEmployeeName(row, filterValue) {
+  const query = normalize(filterValue);
+  if (!query) {
+    return true;
+  }
+
+  return normalize(row.Name).includes(query);
+}
+
+function matchesEmploymentStatus(row, filterValue) {
+  const query = String(filterValue || '').trim();
+  if (!query || query === 'all') {
+    return true;
+  }
+
+  const rowStatus = String(row.EmploymentStatus || '').trim();
+  if (rowStatus) {
+    return rowStatus === query;
+  }
+
+  if (query === 'Active') {
+    return String(row.ContractStatus || '').trim() === 'Active';
+  }
+  if (query === 'Inactive') {
+    return String(row.ContractStatus || '').trim() === 'Expired';
+  }
+
+  return false;
+}
+
+function matchesContractExpiry(row, filterValue) {
+  const query = String(filterValue || '').trim();
+  if (!query || query === 'all') {
+    return true;
+  }
+
+  const daysRemaining = Number(row.ContractDaysRemaining);
+  if (query === 'Expired') {
+    return String(row.ContractStatus || '').trim() === 'Expired' || daysRemaining < 0;
+  }
+  if (query === 'Expiring30') {
+    return daysRemaining >= 0 && daysRemaining <= 30;
+  }
+  if (query === 'Expiring60') {
+    return daysRemaining > 30 && daysRemaining <= 60;
+  }
+
+  return true;
+}
+
 export function applyFilters(rows, filters) {
-  const search = String(filters.search || '').trim().toLowerCase();
+  const search = normalize(filters.search);
+  const professionFilter = filters.jobTitle || filters.profession;
 
   return (rows || []).filter((row) => {
     if (filters.nationality && filters.nationality !== 'all' && row.Nationality !== filters.nationality) {
       return false;
     }
 
-    if (filters.profession && filters.profession !== 'all' && row.Profession !== filters.profession) {
+    if (professionFilter && professionFilter !== 'all' && row.Profession !== professionFilter) {
       return false;
     }
 
@@ -42,9 +107,24 @@ export function applyFilters(rows, filters) {
       }
     }
 
+    if (!matchesEmployeeNumber(row, filters.employeeNumber)) {
+      return false;
+    }
+
+    if (!matchesEmployeeName(row, filters.employeeName)) {
+      return false;
+    }
+
+    if (!matchesEmploymentStatus(row, filters.employmentStatus)) {
+      return false;
+    }
+
+    if (!matchesContractExpiry(row, filters.contractExpiry)) {
+      return false;
+    }
+
     if (search) {
-      const haystack = `${row.Name || ''} ${row.EmployeeNumber || ''} ${row.ContractNumber || ''}`.toLowerCase();
-      if (!haystack.includes(search)) {
+      if (!normalize(row.Name).includes(search)) {
         return false;
       }
     }
@@ -73,6 +153,13 @@ export function sortRows(rows, sortKey, direction = 'asc') {
 
     if (typeof aValue === 'number' && typeof bValue === 'number') {
       return (aValue - bValue) * sign;
+    }
+
+    if (['EmployeeNumber', 'ContractNumber'].includes(sortKey)) {
+      return String(aValue).localeCompare(String(bValue), 'en', {
+        sensitivity: 'base',
+        numeric: true,
+      }) * sign;
     }
 
     const aDate = dayjs(aValue);
@@ -119,5 +206,6 @@ export function buildFilterOptions(rows) {
   return {
     nationalities: Array.from(nationalitySet).sort((a, b) => a.localeCompare(b)),
     professions: Array.from(professionSet).sort((a, b) => a.localeCompare(b)),
+    jobTitles: Array.from(professionSet).sort((a, b) => a.localeCompare(b)),
   };
 }

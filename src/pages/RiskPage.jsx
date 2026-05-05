@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, PieChart, Pie, Cell, Legend } from 'recharts';
 import { formatDate, formatNumber } from '../utils/format';
+import { createAxisTickRenderer, getCategoryAxisWidth } from '../utils/charting.jsx';
 
 const pieColors = ['#d9534f', '#ef8f34', '#2a9d65'];
 
@@ -54,6 +55,23 @@ export default function RiskPage({ rows, lang }) {
       .slice(0, 10);
   }, [expiring]);
 
+  const professionAxisWidth = useMemo(
+    () => getCategoryAxisWidth(riskByProfession, 'name', { min: 150, max: 260 }),
+    [riskByProfession]
+  );
+
+  const professionTick = useMemo(
+    () =>
+      createAxisTickRenderer({
+        maxLength: lang === 'ar' ? 14 : 18,
+        textAnchor: 'end',
+        dx: -6,
+        dy: 4,
+        direction: lang === 'ar' ? 'rtl' : 'ltr',
+      }),
+    [lang]
+  );
+
   return (
     <div className="page-card">
       <div className="page-header">
@@ -82,14 +100,14 @@ export default function RiskPage({ rows, lang }) {
         <div className="chart-card">
           <h3>{lang === 'ar' ? 'حالة الهوية' : 'ID Expiry Status'}</h3>
           <ResponsiveContainer width="100%" height={260}>
-            <PieChart>
+            <PieChart margin={{ top: 8, right: 12, left: 12, bottom: 12 }}>
               <Pie data={idStatusData} dataKey="value" nameKey="name" outerRadius={95}>
                 {idStatusData.map((item, idx) => (
                   <Cell key={item.name} fill={pieColors[idx % pieColors.length]} />
                 ))}
               </Pie>
               <Tooltip />
-              <Legend />
+              <Legend verticalAlign="bottom" height={36} />
             </PieChart>
           </ResponsiveContainer>
         </div>
@@ -97,10 +115,20 @@ export default function RiskPage({ rows, lang }) {
         <div className="chart-card">
           <h3>{lang === 'ar' ? 'المخاطر حسب المهنة' : 'Risk by Profession'}</h3>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={riskByProfession} layout="vertical">
+            <BarChart
+              data={riskByProfession}
+              layout="vertical"
+              margin={{ top: 8, right: 20, left: 10, bottom: 8 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2eded" />
               <XAxis type="number" allowDecimals={false} />
-              <YAxis type="category" dataKey="name" width={130} />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={professionAxisWidth}
+                tick={professionTick}
+                tickMargin={8}
+              />
               <Tooltip />
               <Bar dataKey="value" fill="#d9534f" radius={[8, 8, 8, 8]} />
             </BarChart>
@@ -110,7 +138,7 @@ export default function RiskPage({ rows, lang }) {
 
       <div className="chart-card" style={{ marginTop: 12 }}>
         <h3>{lang === 'ar' ? 'العقود المنتهية قريبًا (90 يوم)' : 'Contracts Expiring in 90 Days'}</h3>
-        <div className="table-wrap" style={{ maxHeight: 280 }}>
+        <div className="table-wrap" style={{ maxHeight: 'min(280px, 42vh)' }}>
           <table className="table">
             <thead>
               <tr>

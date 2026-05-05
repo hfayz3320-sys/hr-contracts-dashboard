@@ -13,6 +13,7 @@ import {
   YAxis,
 } from 'recharts';
 import { formatNumber, monthKey, monthLabel } from '../utils/format';
+import { createAxisTickRenderer, getCategoryAxisWidth } from '../utils/charting.jsx';
 
 const colors = ['#2f968d', '#1f7a7a', '#4fb0a6', '#7cc9bf', '#247770'];
 
@@ -55,6 +56,23 @@ export default function ExecutivePage({ rows, lang, t }) {
       .slice(0, 5);
   }, [rows]);
 
+  const professionAxisWidth = useMemo(
+    () => getCategoryAxisWidth(topProfessions, 'profession', { min: 148, max: 260 }),
+    [topProfessions]
+  );
+
+  const professionTick = useMemo(
+    () =>
+      createAxisTickRenderer({
+        maxLength: lang === 'ar' ? 14 : 18,
+        textAnchor: 'end',
+        dx: -6,
+        dy: 4,
+        direction: lang === 'ar' ? 'rtl' : 'ltr',
+      }),
+    [lang]
+  );
+
   return (
     <div className="page-card">
       <div className="page-header">
@@ -90,9 +108,9 @@ export default function ExecutivePage({ rows, lang, t }) {
         <div className="chart-card">
           <h3>{lang === 'ar' ? 'عدد الموظفين حسب الشهر' : 'Headcount by Month'}</h3>
           <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={monthlySeries} margin={{ top: 8, right: 10, left: 0, bottom: 0 }}>
+            <LineChart data={monthlySeries} margin={{ top: 8, right: 16, left: 12, bottom: 12 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e2eded" />
-              <XAxis dataKey="month" />
+              <XAxis dataKey="month" tickMargin={8} />
               <YAxis allowDecimals={false} />
               <Tooltip />
               <Line type="monotone" dataKey="headcount" stroke="#1f7a7a" strokeWidth={3} dot={{ r: 3 }} />
@@ -103,10 +121,20 @@ export default function ExecutivePage({ rows, lang, t }) {
         <div className="chart-card">
           <h3>{lang === 'ar' ? 'أعلى 5 مهن' : 'Top 5 Professions'}</h3>
           <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={topProfessions} layout="vertical" margin={{ top: 8, right: 10, left: 20, bottom: 0 }}>
+            <BarChart
+              data={topProfessions}
+              layout="vertical"
+              margin={{ top: 8, right: 20, left: 10, bottom: 8 }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2eded" />
               <XAxis type="number" allowDecimals={false} />
-              <YAxis dataKey="profession" type="category" width={120} />
+              <YAxis
+                dataKey="profession"
+                type="category"
+                width={professionAxisWidth}
+                tick={professionTick}
+                tickMargin={8}
+              />
               <Tooltip />
               <Bar dataKey="value" radius={[8, 8, 8, 8]}>
                 {topProfessions.map((item, idx) => (
