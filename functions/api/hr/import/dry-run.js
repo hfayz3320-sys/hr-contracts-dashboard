@@ -9,6 +9,8 @@
  */
 import { dryRunImport } from '../../../lib/hrUpsert.js';
 import { requireAdmin } from '../../../lib/requireAdmin.js';
+// Path note: this file is at functions/api/hr/import/dry-run.js so
+// ../../../lib/* resolves to functions/lib/* (3 levels up to /functions).
 
 export const onRequestPost = async ({ env, request }) => {
   const denied = requireAdmin(request, env);

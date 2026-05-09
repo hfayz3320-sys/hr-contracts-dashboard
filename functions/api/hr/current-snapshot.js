@@ -7,7 +7,7 @@
  *   200 → { source: 'real-imported', job, counts, persons, contracts, insurance, review }
  *   404 → { source: null, message: 'No production HR data has been imported yet.' }
  */
-import { readCurrentSnapshot } from '../../../lib/hrUpsert.js';
+import { readCurrentSnapshot } from '../../lib/hrUpsert.js';
 
 export const onRequestGet = async ({ env }) => {
   if (!env.DB) {
