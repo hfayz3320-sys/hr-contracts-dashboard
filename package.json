@@ -9,7 +9,11 @@
     "dev:all": "concurrently -k \"npm run api\" \"npm run dev\"",
     "build": "vite build",
     "preview": "vite preview",
-    "serve:shared": "npm run build && npm run api"
+    "serve:shared": "npm run build && npm run api",
+    "contracts:manifest": "node scripts/build-contracts-manifest.mjs",
+    "postbuild:strip-pii": "node scripts/postbuild-strip-pii.mjs",
+    "build:safe": "npm run build && npm run postbuild:strip-pii",
+    "verify:dist-pii": "node scripts/postbuild-strip-pii.mjs --check-only"
   },
   "dependencies": {
     "cors": "^2.8.5",

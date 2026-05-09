@@ -10,7 +10,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { readSpreadsheetFile, parsePdfUploads } from '../utils/fileImport';
+import { readSpreadsheetFile, readSpreadsheetFromUrl, parsePdfUploads } from '../utils/fileImport';
 import { cleanDataset } from '../utils/cleaning';
 import { FEATURE_FLAGS } from '../utils/featureFlags';
 
@@ -20,6 +20,8 @@ import {
   commitEmployeeMasterImport,
   commitContractImport,
 } from '../services/imports/importCommitService';
+import { commitLocalAssetsWithRollback } from '../services/imports/importRollbackService';
+import { buildImportQualityGate }         from '../services/imports/importQualityGate';
 import { extractContractFromPdf } from '../services/imports/parsers';
 
 import { personRepository }                 from '../storage/repositories/personRepository';
@@ -225,6 +227,234 @@ function PDFUploadTile({ onPreviewBuilt, busy, setBusy }) {
   );
 }
 
+// ── Load Local HR Assets ────────────────────────────────────────────────────
+//
+// One-click fetch from public/data/. Tries the operator's real Arabic-named
+// file first (بيانات الموظفين.xlsx), then sample.xlsx. Reads the manifest
+// at /data/contracts-manifest.json to discover PDFs in either Contract/ or
+// contracts/ folder. All paths are local-only and gitignored.
+
+async function buildLocalAssetsPreview() {
+  const candidates = [
+    '/data/' + encodeURIComponent('بيانات الموظفين.xlsx'),
+    '/data/sample.xlsx',
+  ];
+  // Try Excel candidates in order
+  let emRows = null;
+  let emSourceFile = null;
+  let emError = null;
+  for (const url of candidates) {
+    try {
+      const { rows } = await readSpreadsheetFromUrl(url);
+      if (rows && rows.length) {
+        emRows = rows;
+        emSourceFile = url.split('/').pop();
+        break;
+      }
+    } catch (err) {
+      emError = err;
+    }
+  }
+
+  if (!emRows) {
+    throw new Error(
+      'No Employee Master Excel found under /public/data/. ' +
+      'Place بيانات الموظفين.xlsx (or sample.xlsx) in public/data/, then retry.\n' +
+      (emError ? 'Last error: ' + emError.message : '')
+    );
+  }
+
+  // Load contracts manifest to know what PDFs exist
+  const manifest = await fetch('/data/contracts-manifest.json', { cache: 'no-store' })
+    .then((r) => (r.ok && /json/i.test(r.headers.get('content-type') || '') ? r.json() : []))
+    .catch(() => []);
+
+  // Fetch each PDF blob and feed them through the same flow as drag-drop
+  const pdfFiles = [];
+  for (const entry of manifest) {
+    try {
+      const r = await fetch(entry.path, { cache: 'no-store' });
+      if (!r.ok) continue;
+      const blob = await r.blob();
+      pdfFiles.push(new File([blob], entry.fileName, { type: 'application/pdf' }));
+    } catch {
+      /* skip individual fetch failures */
+    }
+  }
+
+  // Build EM preview (cleanDataset → buildEmployeeMasterImportPreview)
+  const { cleanedRows } = cleanDataset(emRows);
+  const [persons, snapshots, history, contractRecs] = await Promise.all([
+    personRepository.listAll(),
+    employeeMasterSnapshotRepository.listAll(),
+    employeeNumberHistoryRepository.listAll(),
+    contractRecordRepository.listAll(),
+  ]);
+  const emPreview = buildEmployeeMasterImportPreview({
+    cleanedRows,
+    existingPersons:   persons,
+    existingSnapshots: snapshots,
+    existingHistory:   history,
+    sourceFile:        emSourceFile,
+  });
+
+  // Build PDF preview by extracting each fetched PDF
+  const extracted = [];
+  for (const file of pdfFiles) {
+    const buf = await file.arrayBuffer();
+    extracted.push(await extractContractFromPdf(buf, file.name));
+  }
+  const pdfPreview = buildContractImportPreview({
+    extractedContracts:      extracted,
+    existingPersons:         persons,
+    existingContractRecords: contractRecs,
+    existingHistory:         history,
+    sourceFiles:             pdfFiles.map((f) => f.name),
+  });
+
+  return {
+    em:  { preview: emPreview,  sourceFile: emSourceFile },
+    pdf: { preview: pdfPreview, extractedCount: extracted.length, totalManifest: manifest.length },
+  };
+}
+
+function LocalAssetsTile({ onPreviewBuilt, busy, setBusy }) {
+  const [error, setError]       = useState(null);
+  const [progress, setProgress] = useState(null);
+
+  async function handleClick() {
+    setBusy(true);
+    setError(null);
+    setProgress('Reading public/data/ …');
+    try {
+      const result = await buildLocalAssetsPreview();
+      onPreviewBuilt('local', result, 'public/data/ (Excel + Contract folder)');
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  return (
+    <div style={tileStyle}>
+      <h3 style={{ marginTop: 0 }}>Load Local HR Assets</h3>
+      <p style={tileHint}>
+        One click — reads the Employee Master Excel + every PDF under
+        <code> public/data/Contract/</code> in one go. Use after running
+        <code> npm run contracts:manifest</code>.
+      </p>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={handleClick}
+        style={{
+          padding: '8px 16px',
+          background: '#0f766e',
+          color: 'white',
+          border: 'none',
+          borderRadius: 6,
+          cursor: busy ? 'not-allowed' : 'pointer',
+          fontWeight: 600,
+        }}
+      >
+        {busy ? 'Loading…' : 'Load from public/data/'}
+      </button>
+      {progress && <div style={{ fontSize: 12, marginTop: 6 }}>{progress}</div>}
+      {error    && <div style={errStyle}>{error}</div>}
+    </div>
+  );
+}
+
+function LocalPreviewPanel({ preview, onCommit, onCancel, committing, committed }) {
+  const em  = preview.em.preview.summary;
+  const pdf = preview.pdf.preview.summary;
+  const gate = buildImportQualityGate({
+    emPreview:  preview.em.preview,
+    pdfPreview: preview.pdf.preview,
+  });
+  return (
+    <div style={panelStyle}>
+      <h2 style={{ marginTop: 0 }}>Preview — Local HR Assets</h2>
+      <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 12 }}>
+        Source: <code>public/data/</code> · Excel: <code>{preview.em.sourceFile}</code> ·
+        PDFs in manifest: <strong>{preview.pdf.totalManifest}</strong> · extracted: <strong>{preview.pdf.extractedCount}</strong>
+      </div>
+
+      {/* ── Quality gate ───────────────────────────────────────────────── */}
+      <div style={{
+        marginBottom: 16, padding: 12,
+        background: gate.safeToCommit ? '#f0fdf4' : '#fef2f2',
+        border: '1px solid ' + (gate.safeToCommit ? '#86efac' : '#fca5a5'),
+        borderRadius: 8,
+      }}>
+        <div style={{ fontWeight: 600, marginBottom: 8 }}>
+          Quality gate — {gate.safeToCommit ? '✓ Safe to commit' : '⚠ Blockers present'}
+        </div>
+        <div style={statRowStyle}>
+          <StatTile label="Complete contracts"  value={gate.summary.completeContracts}  tone="success" />
+          <StatTile label="Partial contracts"   value={gate.summary.partialContracts}   tone="warning" />
+          <StatTile label="Missing identity"    value={gate.summary.missingIdentity}    tone="critical" />
+          <StatTile label="Invalid identity"    value={gate.summary.invalidIdentity}    tone="critical" />
+          <StatTile label="ContractOnly"        value={gate.summary.contractOnlyPersons} />
+          <StatTile label="Duplicate identity" value={gate.summary.duplicateIdentity}  tone="critical" />
+          <StatTile label="EmpNo divergence"   value={gate.summary.empNoDivergence}    tone="warning" />
+        </div>
+        {gate.blockers.length > 0 && (
+          <ul style={{ marginTop: 8, color: '#b91c1c', fontSize: 13 }}>
+            {gate.blockers.map((b, i) => <li key={i}>{b}</li>)}
+          </ul>
+        )}
+        {gate.warnings.length > 0 && (
+          <ul style={{ marginTop: 8, color: '#92400e', fontSize: 13 }}>
+            {gate.warnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        )}
+      </div>
+
+      <h3 style={{ marginTop: 16, marginBottom: 8 }}>Employee Master rows</h3>
+      <div style={statRowStyle}>
+        <StatTile label="Total rows"       value={em.total} />
+        <StatTile label="New persons"      value={em.new}              tone="success" />
+        <StatTile label="Updated"          value={em.updated} />
+        <StatTile label="Unchanged"        value={em.unchanged} />
+        <StatTile label="EmpNo history"    value={em.empNoHistoryCandidates}  tone="warning" />
+        <StatTile label="Invalid identity" value={em.invalidIdentity}         tone="critical" />
+        <StatTile label="Missing identity" value={em.missingIdentity}         tone="critical" />
+      </div>
+
+      <h3 style={{ marginTop: 16, marginBottom: 8 }}>Contract PDFs</h3>
+      <div style={statRowStyle}>
+        <StatTile label="Total"            value={pdf.total} />
+        <StatTile label="Matched person"   value={pdf.newContractForExistingPerson} tone="success" />
+        <StatTile label="Contract-only"    value={pdf.newContractOnlyPerson} />
+        <StatTile label="Duplicate"        value={pdf.duplicateContract} />
+        <StatTile label="EmpNo history"    value={pdf.empNoHistoryCandidates}     tone="warning" />
+        <StatTile label="Invalid identity" value={pdf.invalidIdentity}            tone="critical" />
+        <StatTile label="Missing identity" value={pdf.missingIdentity}            tone="critical" />
+        <StatTile label="Extraction errs"  value={pdf.extractionError}            tone="critical" />
+      </div>
+
+      {!committed && (
+        <div style={btnRowStyle}>
+          <button type="button" style={btnPrimaryStyle} disabled={committing} onClick={onCommit}>
+            {committing ? 'Committing…' : 'Commit (EM then PDFs)'}
+          </button>
+          <button type="button" style={btnGhostStyle} disabled={committing} onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      )}
+      {committed && (
+        <div style={successStyle}>
+          ✓ Imported. EM job: <code>{committed.emJobId}</code> · PDF job: <code>{committed.pdfJobId}</code>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── preview panels ──────────────────────────────────────────────────────────
 
 function EMPreviewPanel({ preview, onCommit, onCancel, committing, committed }) {
@@ -345,9 +575,24 @@ export default function ImportDashboardPage() {
     setCommitting(true);
     setCommitError(null);
     try {
-      const fn = activePreview.kind === 'em' ? commitEmployeeMasterImport : commitContractImport;
-      const res = await fn(activePreview.data.preview, { importedBy: null });
-      setCommitted(res);
+      if (activePreview.kind === 'local') {
+        // Two-phase commit with rollback safety. If PDF commit fails, the EM
+        // commit is reversed before the error surfaces.
+        const result = await commitLocalAssetsWithRollback({
+          emPreview:  activePreview.data.em.preview,
+          pdfPreview: activePreview.data.pdf.preview,
+          opts:       { importedBy: null },
+        });
+        setCommitted({
+          emJobId:  result.em.importJobId,
+          pdfJobId: result.pdf.importJobId,
+          counts:   result.counts,
+        });
+      } else {
+        const fn = activePreview.kind === 'em' ? commitEmployeeMasterImport : commitContractImport;
+        const res = await fn(activePreview.data.preview, { importedBy: null });
+        setCommitted(res);
+      }
     } catch (err) {
       setCommitError(err?.message || String(err));
     } finally {
@@ -372,8 +617,9 @@ export default function ImportDashboardPage() {
 
       <Section title="1 — Pick a source">
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-          <EMUploadTile  onPreviewBuilt={handlePreviewBuilt} busy={busy} setBusy={setBusy} />
-          <PDFUploadTile onPreviewBuilt={handlePreviewBuilt} busy={busy} setBusy={setBusy} />
+          <EMUploadTile      onPreviewBuilt={handlePreviewBuilt} busy={busy} setBusy={setBusy} />
+          <PDFUploadTile     onPreviewBuilt={handlePreviewBuilt} busy={busy} setBusy={setBusy} />
+          <LocalAssetsTile   onPreviewBuilt={handlePreviewBuilt} busy={busy} setBusy={setBusy} />
         </div>
       </Section>
 
@@ -392,6 +638,15 @@ export default function ImportDashboardPage() {
             <PDFPreviewPanel
               preview={activePreview.data.preview}
               extractedCount={activePreview.data.extractedCount}
+              onCommit={handleCommit}
+              onCancel={handleCancel}
+              committing={committing}
+              committed={committed}
+            />
+          )}
+          {activePreview.kind === 'local' && (
+            <LocalPreviewPanel
+              preview={activePreview.data}
               onCommit={handleCommit}
               onCancel={handleCancel}
               committing={committing}
