@@ -23,5 +23,20 @@
       "database_id": "0e91adab-a76a-4f0c-ae11-3017342e0098",
       "migrations_dir": "./migrations"
     }
+  ],
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // R2 binding — PRIVATE bucket for raw HR source files (Excel + PDFs).
+  //
+  // BEFORE FIRST DEPLOY THE OPERATOR MUST:
+  //   1. Enable R2 on the account (one-click in the Cloudflare dashboard).
+  //   2. Run: wrangler r2 bucket create hr-contracts-private
+  //   3. NEVER attach a public custom domain to this bucket.
+  // ───────────────────────────────────────────────────────────────────────────
+  "r2_buckets": [
+    {
+      "binding": "HR_FILES",
+      "bucket_name": "hr-contracts-private"
+    }
   ]
 }

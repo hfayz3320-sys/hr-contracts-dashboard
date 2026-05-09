@@ -312,8 +312,9 @@ async function upsertContract(db, jobId, contract, summary, opts) {
          start_date, end_date, contract_end_type, joining_date, duration_years,
          salary_basic, salary_total, iban, mobile, email,
          parser_type, confidence_score, source_file_name, source_file_hash,
-         contract_key, import_job_id, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+         contract_key, import_job_id, created_at, updated_at,
+         r2_object_key, has_private_file)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .bind(
       id, person ? person.id : null, identity, contract.employeeNumber || null,
@@ -325,7 +326,9 @@ async function upsertContract(db, jobId, contract, summary, opts) {
       contract.mobile || null, contract.email || null,
       contract.parserType || null, Number(contract.confidenceScore || 0),
       contract.sourceFileName || null, contract.sourceFileHash || null,
-      key, jobId, NOW(), NOW()
+      key, jobId, NOW(), NOW(),
+      contract.r2ObjectKey || null,
+      contract.hasPrivateFile ? 1 : 0
     )
     .run();
   summary.newContracts += 1;
@@ -452,10 +455,18 @@ export async function applyImport(db, payload, jobMeta) {
   const now     = NOW();
   await db
     .prepare(
-      `INSERT INTO import_jobs (id, source, status, imported_at, created_by)
-       VALUES (?, ?, 'pending', ?, ?)`
+      `INSERT INTO import_jobs
+        (id, source, status, imported_at, created_by,
+         employee_file_r2_key, insurance_file_r2_key, raw_files_bucket, raw_files_count)
+       VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?)`
     )
-    .bind(jobId, jobMeta?.source || 'admin-import', now, jobMeta?.createdBy || null)
+    .bind(
+      jobId, jobMeta?.source || 'admin-import', now, jobMeta?.createdBy || null,
+      jobMeta?.employeeFileR2Key  || null,
+      jobMeta?.insuranceFileR2Key || null,
+      jobMeta?.rawFilesBucket     || null,
+      Number(jobMeta?.rawFilesCount || 0)
+    )
     .run();
 
   const employees = payload.employees || [];

@@ -96,6 +96,9 @@ export function snapshotToRows(snapshot) {
       // Extra non-schema fields the dashboard happens to look at
       ContractEndType: latestContract?.contract_end_type || '',
       personId:        p.id,
+      contractId:      latestContract?.id || null,
+      hasPrivateFile:  Boolean(latestContract?.has_private_file),
+      sourceFileName:  latestContract?.source_file_name || '',
     };
   });
 

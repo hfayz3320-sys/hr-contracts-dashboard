@@ -223,13 +223,61 @@ export default function EmployeeModal({
         </div>
 
         <div style={{ marginTop: 10 }}>
-          {pdfUrl ? (
-            <a className="btn primary" href={pdfUrl} target="_blank" rel="noreferrer">
-              Open Contract PDF
-            </a>
-          ) : (
-            <span className="badge">{t(lang, 'noPdf')}</span>
-          )}
+          {(() => {
+            // Three states for the contract-PDF row:
+            //   1. Has private file in R2 (has_private_file = 1, contract id known)
+            //      → "اسم ملف العقد: …" + "View PDF" → /api/hr/contracts/:id/file
+            //   2. Has source filename but no private file (legacy data)
+            //      → show filename + a localised "no stored file" badge
+            //   3. Nothing at all → muted "no contract file" message
+            const sourceName = employee.SourceFile || employee.sourceFileName;
+            const contractId = employee.contractId; // injected by snapshotToRows
+            const hasPrivate = Boolean(employee.hasPrivateFile);
+
+            if (sourceName && hasPrivate && contractId) {
+              return (
+                <div>
+                  <div style={{ fontSize: 13, marginBottom: 6, color: '#374151' }}>
+                    {lang === 'ar' ? 'اسم ملف العقد: ' : 'Contract file: '}
+                    <strong>{sourceName}</strong>
+                  </div>
+                  <a className="btn primary"
+                    href={`/api/hr/contracts/${encodeURIComponent(contractId)}/file`}
+                    target="_blank" rel="noreferrer">
+                    {lang === 'ar' ? 'عرض ملف العقد' : 'View PDF'}
+                  </a>
+                </div>
+              );
+            }
+            if (sourceName) {
+              return (
+                <div>
+                  <div style={{ fontSize: 13, marginBottom: 6, color: '#374151' }}>
+                    {lang === 'ar' ? 'اسم ملف العقد: ' : 'Contract file: '}
+                    <strong>{sourceName}</strong>
+                  </div>
+                  {pdfUrl ? (
+                    <a className="btn primary" href={pdfUrl} target="_blank" rel="noreferrer">
+                      Open Contract PDF
+                    </a>
+                  ) : (
+                    <span className="badge">
+                      {lang === 'ar' ? 'لا يوجد ملف عقد محفوظ' : 'No stored PDF for this contract'}
+                    </span>
+                  )}
+                </div>
+              );
+            }
+            return pdfUrl ? (
+              <a className="btn primary" href={pdfUrl} target="_blank" rel="noreferrer">
+                Open Contract PDF
+              </a>
+            ) : (
+              <span className="badge">
+                {lang === 'ar' ? 'لا يوجد ملف عقد محفوظ' : 'No stored PDF for this contract'}
+              </span>
+            );
+          })()}
         </div>
 
         <div style={{ marginTop: 14 }}>

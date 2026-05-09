@@ -77,9 +77,25 @@ class D1Shim {
 }
 
 export async function createD1ShimFromMigration(migrationPath) {
+  // Accept either a single migration path or the migrations directory.
   const sqliteDb = new DatabaseSync(':memory:');
-  const sql = await fs.readFile(migrationPath, 'utf-8');
-  sqliteDb.exec(sql);
+  const stat = await fs.stat(migrationPath);
+  if (stat.isDirectory()) {
+    const files = (await fs.readdir(migrationPath)).filter((n) => n.endsWith('.sql')).sort();
+    for (const f of files) {
+      sqliteDb.exec(await fs.readFile(`${migrationPath}/${f}`, 'utf-8'));
+    }
+  } else {
+    sqliteDb.exec(await fs.readFile(migrationPath, 'utf-8'));
+    // Also auto-apply any sibling migration files in the same directory,
+    // sorted, so 0002 + future migrations stay in test scope.
+    const dir = migrationPath.replace(/[/\\][^/\\]+$/, '');
+    const files = (await fs.readdir(dir)).filter((n) => n.endsWith('.sql')).sort();
+    for (const f of files) {
+      if (`${dir}/${f}` === migrationPath || `${dir}\\${f}` === migrationPath) continue;
+      sqliteDb.exec(await fs.readFile(`${dir}/${f}`, 'utf-8'));
+    }
+  }
   return new D1Shim(sqliteDb);
 }
 
