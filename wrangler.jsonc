@@ -1,0 +1,27 @@
+{
+  // Cloudflare Pages project — Functions live under ./functions and the SPA
+  // is built into ./dist by `npm run build:safe`.
+  "name": "hr-contracts-dashboard",
+  "compatibility_date": "2026-03-12",
+  "pages_build_output_dir": "./dist",
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // D1 binding for the production database.
+  //
+  // BEFORE FIRST DEPLOY THE OPERATOR MUST RUN:
+  //   wrangler d1 create hr_dashboard_db
+  // and replace `database_id` below with the printed UUID.
+  //
+  // Migrations live under ./migrations and are applied with:
+  //   wrangler d1 migrations apply hr_dashboard_db --local      (dev)
+  //   wrangler d1 migrations apply hr_dashboard_db --remote     (production)
+  // ───────────────────────────────────────────────────────────────────────────
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hr_dashboard_db",
+      "database_id": "REPLACE_WITH_D1_UUID_FROM_WRANGLER_CREATE",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}

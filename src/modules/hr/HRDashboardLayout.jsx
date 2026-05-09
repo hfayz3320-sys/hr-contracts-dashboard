@@ -32,6 +32,7 @@ import { MODULES, moduleRegistry } from '../../security/config/modules';
 import { PAGE_KEYS, getPageBySlug } from '../../security/config/pages';
 import { permissionService } from '../../security/services/permissionService';
 import { localDataService } from '../../services/storage/localDataService';
+import { resolveStartupSnapshot, shouldHideDemoUI } from '../../services/api/productionMode';
 import { calculateEmployeePageSummary } from '../../services/employees/employeeSummaryService';
 import { pdfImportService } from '../../services/imports/pdfImportService';
 import { insuranceImportService } from '../../services/insurance/insuranceImportService';
@@ -165,6 +166,8 @@ export default function HRDashboardLayout() {
   const [importPanelOpen, setImportPanelOpen] = useState(false);
   const [importPanelTitle, setImportPanelTitle] = useState('Contract PDF Review');
   const [isBootstrapping, setIsBootstrapping] = useState(true);
+  // Production-mode resolver result: 'real' | 'empty' | 'dev-fallback' | 'api-down'
+  const [prodMode, setProdMode] = useState({ mode: 'dev-fallback', snapshot: null, isProd: false });
 
   const currentUser = useAuthStore((state) => state.currentUser);
   const roles = useAuthStore((state) => state.roles);
@@ -284,6 +287,34 @@ export default function HRDashboardLayout() {
     const bootstrap = async () => {
       try {
         setIsBootstrapping(true);
+
+        // Step 1 — ask the API whether a real production snapshot exists.
+        //   - mode 'real'         → production data is in D1, hide demo
+        //   - mode 'empty'        → prod build but no data yet
+        //   - mode 'api-down'     → prod build but Functions not deployed
+        //   - mode 'dev-fallback' → dev environment, fall through to IndexedDB
+        const startup = await resolveStartupSnapshot();
+        if (!cancelled) setProdMode(startup);
+
+        // Step 2 — if we have a real snapshot, surface its source/counts on
+        // the toolbar. The table data continues to be read from IndexedDB
+        // for now (the existing localDataService stores the same content).
+        if (startup.mode === 'real' && startup.snapshot) {
+          const job = startup.snapshot.job || {};
+          const dateLabel = job.committed_at
+            ? new Date(job.committed_at).toLocaleString()
+            : '';
+          // setSourceName lives on the dashboard store — pass through the
+          // existing setRowsAndSummary path so consumers stay unchanged.
+          // (When D1-driven hydration of the table view lands, replace
+          // refreshLocalData() with a direct snapshot→state mapper.)
+        }
+
+        // Step 3 — when a snapshot exists OR we're in dev, also load the
+        // local IndexedDB so the existing table memos work. In a clean
+        // production environment with mode 'empty' we still call this; it
+        // returns empty stores and the dashboard renders the production
+        // empty state defined further below.
         await localDataService.initialize();
         if (!cancelled) {
           await refreshLocalData();
@@ -702,7 +733,11 @@ export default function HRDashboardLayout() {
         <TopToolbar
           lang={language}
           t={t}
-          sourceName={sourceName}
+          sourceName={
+            prodMode.mode === 'real' && prodMode.snapshot?.job?.committed_at
+              ? `Real Imported Data (${new Date(prodMode.snapshot.job.committed_at).toLocaleDateString()})`
+              : sourceName
+          }
           searchValue={filtersDraft.search}
           onSearchChange={handleSearchChange}
           onClearSearch={handleClearSearch}
@@ -710,7 +745,12 @@ export default function HRDashboardLayout() {
           onUseSample={handleUseSample}
           onExportCleaned={canExportCurrentPage ? handleExportCleaned : handleUnauthorizedExport}
           onResetData={handleResetData}
-          pdfCount={pdfFileCount}
+          pdfCount={
+            prodMode.mode === 'real' && prodMode.snapshot?.counts
+              ? prodMode.snapshot.counts.contracts
+              : pdfFileCount
+          }
+          hideDemoButton={shouldHideDemoUI(prodMode)}
         />
 
         {showTopFilterRow ? (
@@ -742,8 +782,30 @@ export default function HRDashboardLayout() {
           <div className="page-card">
             <div className="page-header" style={{ marginBottom: 0 }}>
               <div>
-                <h1>{t(language, 'emptyStateTitle')}</h1>
-                <p>{t(language, 'emptyStateHint')}</p>
+                {prodMode.isProd && prodMode.mode === 'empty' ? (
+                  <>
+                    <h1>{language === 'ar' ? 'لم يتم استيراد بيانات الموارد البشرية بعد' : 'No production HR data has been imported yet'}</h1>
+                    <p>
+                      {language === 'ar'
+                        ? 'يجب على المسؤول استيراد ملف الموظفين وعقود PDF وملف التأمين والاعتماد عبر صفحة الاستيراد.'
+                        : 'Admin must import the Employee Excel, Contract PDFs, and Insurance Excel and commit them via the Import Dashboard.'}
+                    </p>
+                  </>
+                ) : prodMode.isProd && prodMode.mode === 'api-down' ? (
+                  <>
+                    <h1>{language === 'ar' ? 'تعذّر الاتصال بقاعدة البيانات' : 'HR API unavailable'}</h1>
+                    <p>
+                      {language === 'ar'
+                        ? 'تأكد من نشر Cloudflare Pages Functions وإعداد ربط D1.'
+                        : 'Confirm Cloudflare Pages Functions are deployed and the D1 binding is configured.'}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h1>{t(language, 'emptyStateTitle')}</h1>
+                    <p>{t(language, 'emptyStateHint')}</p>
+                  </>
+                )}
               </div>
             </div>
           </div>

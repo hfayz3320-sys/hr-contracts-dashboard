@@ -12,14 +12,21 @@ export default function TopToolbar({
   onExportCleaned,
   onResetData,
   pdfCount,
+  // Production rules: hide demo / sample button + reset button when running in
+  // a production build OR when a real DB snapshot is already loaded.
+  hideDemoButton = false,
 }) {
   return (
     <div className="top-toolbar">
       <div className="toolbar-group">
         <button type="button" className="btn primary" onClick={onImportExcel}>{t(lang, 'importExcel')}</button>
-        <button type="button" className="btn" onClick={onUseSample}>{t(lang, 'useSample')}</button>
+        {!hideDemoButton && (
+          <button type="button" className="btn" onClick={onUseSample}>{t(lang, 'useSample')}</button>
+        )}
         <button type="button" className="btn" onClick={onExportCleaned}>{t(lang, 'exportCleaned')}</button>
-        <button type="button" className="btn ghost" onClick={onResetData}>{t(lang, 'resetData')}</button>
+        {!hideDemoButton && (
+          <button type="button" className="btn ghost" onClick={onResetData}>{t(lang, 'resetData')}</button>
+        )}
       </div>
 
       <div className="toolbar-group">

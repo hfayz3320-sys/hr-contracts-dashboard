@@ -23,6 +23,12 @@ import {
 import { commitLocalAssetsWithRollback } from '../services/imports/importRollbackService';
 import { buildImportQualityGate }         from '../services/imports/importQualityGate';
 import { extractContractFromPdf } from '../services/imports/parsers';
+import {
+  fetchCurrentSnapshot,
+  postImportDryRun,
+  postImportCommit,
+  postImportRollback,
+} from '../services/api/hrApi';
 
 import { personRepository }                 from '../storage/repositories/personRepository';
 import { employeeMasterSnapshotRepository } from '../storage/repositories/employeeMasterSnapshotRepository';
@@ -547,6 +553,221 @@ function PDFPreviewPanel({ preview, extractedCount, onCommit, onCancel, committi
   );
 }
 
+// ── production database (D1 via /api/hr/*) ──────────────────────────────────
+
+/**
+ * Convert the local IndexedDB-shaped previews into the JSON payload the
+ * D1-backed Functions API expects (employees / contracts / insurance arrays).
+ *
+ * The keys mirror functions/lib/hrUpsert.js's row schema. Anything missing
+ * in the preview becomes `null` server-side rather than crashing the upsert.
+ */
+function buildApiPayloadFromPreview(activePreview) {
+  if (!activePreview) return { employees: [], contracts: [], insurance: [] };
+
+  const out = { employees: [], contracts: [], insurance: [], pdfFiles: 0 };
+
+  if (activePreview.kind === 'em' || activePreview.kind === 'local') {
+    const emPreview = activePreview.kind === 'local'
+      ? activePreview.data?.em?.preview
+      : activePreview.data?.preview;
+    const emRows = emPreview?.rows || emPreview?.cleanedRows || [];
+    out.employees = emRows.map((r) => ({
+      identityNumber: r.IdentityNumber || r.identityNumber || null,
+      employeeNumber: r.EmployeeNumber || r.employeeNumber || null,
+      nameEn:         r.NameEn || r.englishName || r.Name || null,
+      nameAr:         r.NameAr || r.arabicName || null,
+      nationality:    r.Nationality || null,
+      dateOfBirth:    r.DateOfBirth || null,
+      mobile:         r.Mobile || r.MobileNumber || null,
+      email:          r.Email || null,
+      iban:           r.IBAN || null,
+      jobTitle:       r.JobTitle || r.Profession || null,
+      department:     r.Department || null,
+      project:        r.Project || null,
+      status:         r.Status || null,
+      sourceFileName: emPreview?.sourceFile || null,
+      source:         'admin-import',
+    }));
+  }
+
+  if (activePreview.kind === 'pdf' || activePreview.kind === 'local') {
+    const pdfPreview = activePreview.kind === 'local'
+      ? activePreview.data?.pdf?.preview
+      : activePreview.data?.preview;
+    const cRows = pdfPreview?.rows || pdfPreview?.contracts || [];
+    out.contracts = cRows.map((c) => ({
+      identityNumber:  c.IdentityNumber || c.identityNumber || null,
+      employeeNumber:  c.EmployeeNumber || c.employeeNumber || null,
+      contractNumber:  c.ContractNumber || c.contractNumber || null,
+      contractType:    c.ContractType   || c.contractType   || null,
+      startDate:       c.StartDate      || c.startDate      || null,
+      endDate:         c.EndDate        || c.endDate        || null,
+      contractEndType: c.ContractEndType || c.contractEndType || null,
+      joiningDate:     c.JoiningDate    || c.joiningDate    || null,
+      durationYears:   c.DurationYears  || null,
+      salaryBasic:     Number(c.BasicSalary || c.salaryBasic || 0) || null,
+      salaryTotal:     Number(c.TotalSalary || c.salaryTotal || 0) || null,
+      iban:            c.IBAN || null,
+      mobile:          c.Mobile || null,
+      email:           c.Email || null,
+      parserType:      c.ParserType || c.parserType || null,
+      confidenceScore: Number(c.ConfidenceScore || c.confidenceScore || 0) || 0,
+      sourceFileName:  c.SourceFileName || c.sourceFileName || null,
+      sourceFileHash:  c.SourceFileHash || null,
+    }));
+    out.pdfFiles = (activePreview.data?.extractedCount) || out.contracts.length;
+  }
+
+  return out;
+}
+
+function ProductionDatabaseSection({ activePreview }) {
+  const [snapshot, setSnapshot]     = React.useState(null);
+  const [snapshotErr, setSnapErr]   = React.useState(null);
+  const [snapLoading, setSnapLoad]  = React.useState(true);
+  const [dryRun, setDryRun]         = React.useState(null);
+  const [committing, setCommitting] = React.useState(false);
+  const [commitResult, setCommitRes] = React.useState(null);
+  const [commitErr, setCommitErr]   = React.useState(null);
+  const [rollingBack, setRollingBack] = React.useState(false);
+
+  async function refreshSnapshot() {
+    setSnapLoad(true);
+    const r = await fetchCurrentSnapshot();
+    if (r.ok) { setSnapshot(r.snapshot); setSnapErr(null); }
+    else if (r.status === 404) { setSnapshot(null); setSnapErr(null); }
+    else { setSnapErr(r.error || `HTTP ${r.status}`); }
+    setSnapLoad(false);
+  }
+
+  React.useEffect(() => { refreshSnapshot(); }, []);
+
+  async function handleDryRun() {
+    if (!activePreview) return;
+    setCommitErr(null);
+    try {
+      const payload = buildApiPayloadFromPreview(activePreview);
+      const r = await postImportDryRun(payload);
+      setDryRun(r);
+    } catch (err) {
+      setCommitErr(err?.message || String(err));
+    }
+  }
+
+  async function handleCommitToProd() {
+    if (!activePreview) return;
+    if (dryRun?.blockers?.length) {
+      if (!window.confirm(
+        `Dry-run reports ${dryRun.blockers.length} blocker(s):\n` +
+        dryRun.blockers.join('\n') + '\n\nProceed anyway? Critical conflicts will go to the review queue.'
+      )) return;
+    }
+    setCommitting(true);
+    setCommitErr(null);
+    try {
+      const payload = buildApiPayloadFromPreview(activePreview);
+      const r = await postImportCommit(payload);
+      setCommitRes(r);
+      await refreshSnapshot();
+    } catch (err) {
+      setCommitErr(err?.message || String(err));
+    } finally {
+      setCommitting(false);
+    }
+  }
+
+  async function handleRollback() {
+    if (!commitResult?.jobId) return;
+    if (!window.confirm(`Rollback import job ${commitResult.jobId}? This reverses every create/update from this commit.`)) return;
+    setRollingBack(true);
+    try {
+      await postImportRollback(commitResult.jobId);
+      setCommitRes(null);
+      setDryRun(null);
+      await refreshSnapshot();
+    } catch (err) {
+      setCommitErr(err?.message || String(err));
+    } finally {
+      setRollingBack(false);
+    }
+  }
+
+  const blockerCount = dryRun?.blockers?.length || 0;
+  const commitDisabled = !activePreview || committing || (blockerCount > 0 && !dryRun);
+
+  return (
+    <Section title="0 — Production database (Cloudflare D1)">
+      {snapLoading ? (
+        <div style={{ color: '#6b7280', fontSize: 13 }}>Loading current snapshot…</div>
+      ) : snapshotErr ? (
+        <div style={errStyle}>API not reachable: {snapshotErr}. Run <code>wrangler pages dev</code> locally or deploy Functions.</div>
+      ) : snapshot ? (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <StatTile label="Source" value="Real Imported Data" tone="success" />
+          <StatTile label="Persons"   value={snapshot.counts.persons} />
+          <StatTile label="Contracts" value={snapshot.counts.contracts} />
+          <StatTile label="Insurance" value={snapshot.counts.insurance} />
+          <StatTile label="Review"    value={snapshot.counts.review} tone={snapshot.counts.review > 0 ? 'warning' : 'success'} />
+          <StatTile label="Last commit" value={snapshot.job?.committed_at ? new Date(snapshot.job.committed_at).toLocaleString() : '-'} />
+        </div>
+      ) : (
+        <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', padding: 12, borderRadius: 6, marginBottom: 12 }}>
+          No production HR data has been imported yet. Pick a source below, build a preview, then run dry-run + commit-to-DB.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" className="btn"
+          onClick={handleDryRun} disabled={!activePreview}>
+          {activePreview ? 'Dry-run against D1' : 'Build a preview first'}
+        </button>
+        <button type="button" className="btn primary"
+          onClick={handleCommitToProd} disabled={commitDisabled}
+          style={{ background: '#15803d', color: '#fff' }}>
+          {committing ? 'Committing…' : 'Commit to Production DB'}
+        </button>
+        {commitResult?.jobId && (
+          <button type="button" className="btn ghost"
+            onClick={handleRollback} disabled={rollingBack}>
+            {rollingBack ? 'Rolling back…' : `Rollback job ${commitResult.jobId.slice(0, 8)}…`}
+          </button>
+        )}
+      </div>
+
+      {dryRun && (
+        <div style={{ marginTop: 12, fontSize: 13 }}>
+          <strong>Dry-run preview</strong>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+            <StatTile label="New persons"      value={dryRun.summary.newPersons} />
+            <StatTile label="Updated persons"  value={dryRun.summary.updatedPersons} />
+            <StatTile label="New contracts"    value={dryRun.summary.newContracts} />
+            <StatTile label="Updated contracts" value={dryRun.summary.updatedContracts} />
+            <StatTile label="Skipped duplicates" value={dryRun.summary.skippedDuplicateContracts} />
+            <StatTile label="EmpNo changed"    value={dryRun.summary.employeeNumberChanged} />
+            <StatTile label="Insurance new"    value={dryRun.summary.newInsuranceRecords} />
+            <StatTile label="Insurance upd"    value={dryRun.summary.updatedInsuranceRecords} />
+            <StatTile label="Blocked rows"     value={dryRun.summary.blockedRows} tone={dryRun.summary.blockedRows > 0 ? 'critical' : 'success'} />
+            <StatTile label="Critical conflicts" value={dryRun.summary.criticalConflicts || 0} tone={dryRun.summary.criticalConflicts > 0 ? 'critical' : 'success'} />
+          </div>
+          {blockerCount > 0 && (
+            <ul style={{ marginTop: 6, color: '#b91c1c' }}>
+              {dryRun.blockers.map((b, i) => <li key={i}>{b}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {commitResult && (
+        <div style={{ marginTop: 12, padding: 10, background: '#dcfce7', border: '1px solid #86efac', borderRadius: 6 }}>
+          <strong>Committed.</strong> Job ID: <code>{commitResult.jobId}</code>
+        </div>
+      )}
+      {commitErr && <div style={errStyle}>{commitErr}</div>}
+    </Section>
+  );
+}
+
 // ── main page ────────────────────────────────────────────────────────────────
 
 export default function ImportDashboardPage() {
@@ -614,6 +835,8 @@ export default function ImportDashboardPage() {
         IdentityNumber is the only matching key. EmployeeNumber differences are recorded as history, never blocking.
         Name extracted from PDFs is reference-only.
       </p>
+
+      <ProductionDatabaseSection activePreview={activePreview} />
 
       <Section title="1 — Pick a source">
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
