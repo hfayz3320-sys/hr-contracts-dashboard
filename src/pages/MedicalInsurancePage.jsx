@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import CollapsibleFilters from '../components/filters/CollapsibleFilters';
 import { exportRowsToCsv, exportRowsToXlsx } from '../utils/fileImport';
 import { paginateRows } from '../utils/filtering';
 import { summarizeInsuranceRecords } from '../services/insurance/insuranceReviewService';
@@ -501,9 +502,29 @@ export default function MedicalInsurancePage({
         </div>
       </div>
 
-      <div className="chart-card employee-filters-card">
-        <h3>Insurance Filters</h3>
-        <div className="insurance-filter-grid">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+      <CollapsibleFilters
+        activeCount={
+          (filters.employeeNumber ? 1 : 0)
+          + (filters.employeeName ? 1 : 0)
+          + (filters.relationship !== 'all' ? 1 : 0)
+          + (filters.memberType !== 'all' ? 1 : 0)
+          + (filters.classDescription !== 'all' ? 1 : 0)
+          + (filters.policyNumber ? 1 : 0)
+          + (filters.contractNumber ? 1 : 0)
+          + (filters.department !== 'all' ? 1 : 0)
+          + (filters.branch !== 'all' ? 1 : 0)
+          + (filters.nationality !== 'all' ? 1 : 0)
+          + (filters.insuranceStatus !== 'all' ? 1 : 0)
+          + (filters.matchStatus !== 'all' ? 1 : 0)
+          + (filters.subscriptionFrom ? 1 : 0)
+          + (filters.subscriptionTo ? 1 : 0)
+        }
+        buttonLabel="Insurance Filters"
+        drawerTitle="Insurance Filters"
+        onClear={() => setFilters(defaultFilters)}
+      >
+        <div className="insurance-filter-grid" style={{ display: 'grid', gap: 12 }}>
           <div className="field">
             <label>Employee Number</label>
             <input
@@ -699,17 +720,8 @@ export default function MedicalInsurancePage({
               }
             />
           </div>
-          <div className="field insurance-filter-actions">
-            <label>&nbsp;</label>
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => setFilters(defaultFilters)}
-            >
-              Reset Filters
-            </button>
-          </div>
         </div>
+      </CollapsibleFilters>
       </div>
 
       <div className="page-card">

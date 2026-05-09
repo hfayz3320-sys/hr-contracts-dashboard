@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import CollapsibleFilters from '../components/filters/CollapsibleFilters';
 import { exportRowsToCsv } from '../utils/fileImport';
 import { formatNumber } from '../utils/format';
 
@@ -105,17 +106,28 @@ export default function DataQualityPage({ lang, t, rows, issues, importSummary }
         </div>
       </div>
 
-      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <select
-          value={severityFilter}
-          onChange={(e) => setSeverityFilter(e.target.value)}
-          style={{ minHeight: 36, borderRadius: 10, border: '1px solid var(--line)', padding: '6px 10px' }}
-        >
-          <option value="all">{t(lang, 'all')}</option>
-          <option value="Critical">Critical</option>
-          <option value="Warning">Warning</option>
-        </select>
+      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         <button className="btn" type="button" onClick={exportQualityCsv}>{t(lang, 'qualityExport')}</button>
+        <CollapsibleFilters
+          activeCount={severityFilter !== 'all' ? 1 : 0}
+          buttonLabel="Filter"
+          drawerTitle="Quality Filters"
+          onClear={() => setSeverityFilter('all')}
+        >
+          <div className="field" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label htmlFor="dqSeverity">Severity</label>
+            <select
+              id="dqSeverity"
+              value={severityFilter}
+              onChange={(e) => setSeverityFilter(e.target.value)}
+              style={{ minHeight: 36, borderRadius: 10, border: '1px solid var(--line)', padding: '6px 10px' }}
+            >
+              <option value="all">{t(lang, 'all')}</option>
+              <option value="Critical">Critical</option>
+              <option value="Warning">Warning</option>
+            </select>
+          </div>
+        </CollapsibleFilters>
       </div>
 
       <div className="chart-card compact-chart-card" style={{ marginTop: 10 }}>
