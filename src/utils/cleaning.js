@@ -17,6 +17,11 @@ const dateFormats = [
   'DD MMM YYYY',
   'MMM DD YYYY',
   'YYYY.MM.DD',
+  // Bupa insurance export format: 11-Jun-25, 25-Jul-2025
+  'DD-MMM-YY',
+  'DD-MMM-YYYY',
+  'D-MMM-YY',
+  'D-MMM-YYYY',
 ];
 
 function normalizeKey(input) {

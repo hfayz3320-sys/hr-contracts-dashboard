@@ -10,8 +10,10 @@ node_modules
 
 # Real employee contract PDFs (Vite copies public/ → dist/)
 public/data/contracts/
+public/data/Contract/
 public/data/contracts-manifest.json
 dist/data/contracts/
+dist/data/Contract/
 dist/data/contracts-manifest.json
 
 # Real Employee Master + Bupa medical xlsx files served via /public
@@ -19,6 +21,9 @@ dist/data/contracts-manifest.json
 #  must also be removed from the working tree so the next push strips it)
 public/data/sample.xlsx
 public/data/popa.xlsx
+# Real Arabic-named HR export (PII)
+public/data/بيانات الموظفين.xlsx
+dist/data/بيانات الموظفين.xlsx
 dist/data/sample.xlsx
 dist/data/popa.xlsx
 

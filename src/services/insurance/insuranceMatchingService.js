@@ -33,21 +33,17 @@ export function matchInsuranceRecordToEmployee(record, employees) {
   const byEmployeeNumber = buildMultiMap(list, (row) => row.EmployeeNumber);
   const byIdentityNumber = buildMultiMap(list, (row) => row.IdentityNumber);
 
-  const staffMatches = byEmployeeNumber.get(normalize(record.StaffNumber)) || [];
-  if (staffMatches.length === 1) {
-    return createMatchResult(MATCH_STATUSES.MATCHED, staffMatches[0], 'Matched by StaffNumber.');
-  }
-  if (staffMatches.length > 1) {
-    return createMatchResult(
-      MATCH_STATUSES.DUPLICATE_MATCH_RISK,
-      null,
-      'Multiple employees matched StaffNumber.'
-    );
-  }
+  // Identity-centric order (per identity model rules):
+  //   1. IDNo            → IdentityNumber  (primary)
+  //   2. MainMemberID    → IdentityNumber  (dependents link to main employee)
+  //   3. StaffNumber     → EmployeeNumber  (fallback only — EmpNo can change
+  //                                          across renewals so it's not safe
+  //                                          as the primary key)
 
+  // 1. IDNo → IdentityNumber
   const idMatches = byIdentityNumber.get(normalize(record.IDNo)) || [];
   if (idMatches.length === 1) {
-    return createMatchResult(MATCH_STATUSES.MATCHED, idMatches[0], 'Matched by IDNo.');
+    return createMatchResult(MATCH_STATUSES.MATCHED, idMatches[0], 'Matched by IDNo (IdentityNumber).');
   }
   if (idMatches.length > 1) {
     return createMatchResult(
@@ -57,15 +53,20 @@ export function matchInsuranceRecordToEmployee(record, employees) {
     );
   }
 
+  // 2. MainMemberID → IdentityNumber (dependents)
   const mainMemberMatches = byIdentityNumber.get(normalize(record.MainMemberID)) || [];
   if (mainMemberMatches.length === 1) {
+    // Dependent linking to the main employee — direct match (not review).
+    const isDependent = String(record.Relationship || '').trim().toLowerCase() !== ''
+      && String(record.Relationship || '').trim().toLowerCase() !== 'employee'
+      && String(record.Relationship || '').trim().toLowerCase() !== 'main';
     return createMatchResult(
-      MATCH_STATUSES.NEEDS_REVIEW,
+      isDependent ? MATCH_STATUSES.MATCHED : MATCH_STATUSES.NEEDS_REVIEW,
       mainMemberMatches[0],
-      'Fallback match by MainMemberID requires review.',
-      {
-        needsReviewReason: 'Fallback identity match requires manual confirmation.',
-      }
+      isDependent
+        ? 'Dependent linked to main employee via MainMemberID.'
+        : 'Fallback match by MainMemberID requires review.',
+      isDependent ? {} : { needsReviewReason: 'Fallback identity match requires manual confirmation.' }
     );
   }
   if (mainMemberMatches.length > 1) {
@@ -73,6 +74,24 @@ export function matchInsuranceRecordToEmployee(record, employees) {
       MATCH_STATUSES.DUPLICATE_MATCH_RISK,
       null,
       'Multiple employees matched MainMemberID.'
+    );
+  }
+
+  // 3. StaffNumber → EmployeeNumber (fallback only)
+  const staffMatches = byEmployeeNumber.get(normalize(record.StaffNumber)) || [];
+  if (staffMatches.length === 1) {
+    return createMatchResult(
+      MATCH_STATUSES.NEEDS_REVIEW,
+      staffMatches[0],
+      'Fallback match by StaffNumber requires review (EmpNo is not a stable key).',
+      { needsReviewReason: 'StaffNumber matched but IDNo did not — verify identity.' }
+    );
+  }
+  if (staffMatches.length > 1) {
+    return createMatchResult(
+      MATCH_STATUSES.DUPLICATE_MATCH_RISK,
+      null,
+      'Multiple employees matched StaffNumber.'
     );
   }
 

@@ -394,10 +394,25 @@ export default function HRDashboardLayout() {
   const handleUseSample = async () => {
     try {
       setIsBootstrapping(true);
-      await localDataService.reseedDefaultData();
+      const result = await localDataService.reseedDefaultData();
       await refreshLocalData();
+      // Surface a non-blocking warning when some default-data files were
+      // missing (e.g. /data/sample.xlsx removed for security). The dashboard
+      // continues with whatever data is available — empty stores are fine.
+      if (result?.warnings?.length) {
+        const lines = result.warnings.map((w) =>
+          `• ${w.label || w.file}: ${w.reason}${w.hint ? '\n   ' + w.hint : ''}`
+        );
+        alert(
+          `Sample data partially loaded:\n` +
+          `   employees rows : ${result.rows}\n` +
+          `   contract PDFs  : ${result.matchedPdfs}/${result.pdfs}\n` +
+          `   insurance rows : ${result.insuranceRows}\n\n` +
+          `Warnings:\n${lines.join('\n')}`
+        );
+      }
     } catch (error) {
-      alert(t(language, 'sampleFailed'));
+      alert(t(language, 'sampleFailed') + '\n\n' + (error?.message || String(error)));
       console.error(error);
     } finally {
       setIsBootstrapping(false);
@@ -487,8 +502,17 @@ export default function HRDashboardLayout() {
       setIsBootstrapping(true);
       localDataService
         .reseedDefaultData()
-        .then(() => refreshLocalData())
-        .catch((error) => console.error(error))
+        .then((result) => {
+          // Pass-through warnings so the operator knows some defaults were skipped.
+          if (result?.warnings?.length) {
+            console.warn('[reseed] partial seed:', result.warnings);
+          }
+          return refreshLocalData();
+        })
+        .catch((error) => {
+          console.error(error);
+          alert('Reset failed: ' + (error?.message || String(error)));
+        })
         .finally(() => setIsBootstrapping(false));
     }
   };

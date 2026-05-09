@@ -13,7 +13,7 @@ import { reviewQueueRepository } from '../../storage/repositories/reviewQueueRep
 import { applyInsuranceMatching } from '../insurance/insuranceMatchingService';
 import { normalizeInsuranceRows } from '../insurance/insuranceNormalizer';
 import { hashBlob } from '../../utils/hash';
-import { readSpreadsheetFromUrl } from '../../utils/fileImport';
+import { readSpreadsheetFromUrl, SpreadsheetMissingError } from '../../utils/fileImport';
 import {
   deduplicateEmployeeContractData,
   findEmployeeMasterMatch,
@@ -22,8 +22,13 @@ import {
   resolveContractForEmployee,
 } from '../employees/employeeMergeService';
 
-const DEFAULT_SEED_VERSION = 'public-default-seed-v2';
-const DEFAULT_SAMPLE_URL = '/data/sample.xlsx';
+const DEFAULT_SEED_VERSION = 'public-default-seed-v3';
+// The real HR export is named "بيانات الموظفين.xlsx". The legacy naming
+// (sample.xlsx) is kept as a fallback so older installs still work.
+const DEFAULT_SAMPLE_URL_CANDIDATES = [
+  '/data/' + encodeURIComponent('بيانات الموظفين.xlsx'),
+  '/data/sample.xlsx',
+];
 const DEFAULT_INSURANCE_URL = '/data/popa.xlsx';
 const DEFAULT_CONTRACTS_MANIFEST_URL = '/data/contracts-manifest.json';
 
@@ -136,9 +141,23 @@ async function reconcileStoredEmployeeContracts() {
 async function fetchJson(url) {
   const response = await fetch(url, { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Failed to fetch ${url}`);
+    throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
   }
-  return response.json();
+  // SPA fallback guard: a missing /data/*.json gets index.html instead of JSON.
+  const contentType = response.headers.get('content-type') || '';
+  if (/text\/html|application\/xhtml/i.test(contentType)) {
+    throw new Error(`${url} is missing (server returned HTML instead of JSON).`);
+  }
+  const text = await response.text();
+  // Final guard: SheetJS-style HTML body without proper Content-Type.
+  if (/^\s*<!doctype|^\s*<html/i.test(text)) {
+    throw new Error(`${url} is missing (HTML body received).`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new Error(`${url} is not valid JSON: ${err.message}`);
+  }
 }
 
 async function fetchManifestPdfPayloads(entries, existingRecords) {
@@ -199,15 +218,85 @@ async function performDefaultSeed({ clearExisting = false } = {}) {
     }
   }
 
-  const [{ rows: rawRows }, { rows: rawInsuranceRows }] = await Promise.all([
-    readSpreadsheetFromUrl(DEFAULT_SAMPLE_URL),
-    readSpreadsheetFromUrl(DEFAULT_INSURANCE_URL),
-  ]);
+  // Defensive seed: each fetch is independent. A missing static file (e.g.
+  // because we removed real-PII /data/sample.xlsx for security) must NOT
+  // crash the dashboard — the legacy reseed degrades to empty stores and
+  // returns warnings the UI can surface.
+  const warnings = [];
+
+  const safeFetchSpreadsheet = async (url, label) => {
+    try {
+      const { rows } = await readSpreadsheetFromUrl(url);
+      return rows;
+    } catch (err) {
+      if (err instanceof SpreadsheetMissingError) {
+        console.warn(`[reseed] ${label} not available:`, err.message);
+        warnings.push({ file: url, label, reason: err.message, hint: err.hint });
+      } else {
+        console.warn(`[reseed] ${label} failed:`, err);
+        warnings.push({ file: url, label, reason: err.message });
+      }
+      return [];
+    }
+  };
+
+  // Try each candidate URL in order. First success wins. Each individual
+  // miss is logged but the overall fetch only registers a warning when
+  // every candidate failed.
+  const safeFetchSpreadsheetCandidates = async (urls, label) => {
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        const { rows } = await readSpreadsheetFromUrl(url);
+        if (rows && rows.length) return { rows, url };
+        lastErr = new Error(`${url} returned 0 rows`);
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (lastErr instanceof SpreadsheetMissingError) {
+      warnings.push({ file: urls.join(' | '), label, reason: lastErr.message, hint: lastErr.hint });
+    } else if (lastErr) {
+      warnings.push({ file: urls.join(' | '), label, reason: lastErr.message });
+    }
+    return { rows: [], url: null };
+  };
+
+  const safeFetchJson = async (url, label) => {
+    try {
+      return await fetchJson(url);
+    } catch (err) {
+      console.warn(`[reseed] ${label} not available:`, err.message);
+      warnings.push({ file: url, label, reason: err.message });
+      return null;
+    }
+  };
+
+  const emResult         = await safeFetchSpreadsheetCandidates(
+    DEFAULT_SAMPLE_URL_CANDIDATES,
+    'Employee dataset (بيانات الموظفين.xlsx / sample.xlsx)'
+  );
+  const rawRows          = emResult.rows;
+  const rawInsuranceRows = await safeFetchSpreadsheet(DEFAULT_INSURANCE_URL, 'Medical insurance dataset (popa.xlsx)');
+  const manifest         = await safeFetchJson(DEFAULT_CONTRACTS_MANIFEST_URL, 'Contracts manifest');
+
   const { cleanedRows } = cleanDataset(rawRows);
-  const manifest = await fetchJson(DEFAULT_CONTRACTS_MANIFEST_URL);
-  const manifestEntries = normalizeManifestEntries(manifest);
-  const existingPdfRecords = await pdfRepository.listAll();
-  const pdfPayloads = await fetchManifestPdfPayloads(manifestEntries, existingPdfRecords);
+  const manifestEntries = normalizeManifestEntries(manifest || []);
+
+  let pdfPayloads = [];
+  if (manifestEntries.length) {
+    try {
+      const existingPdfRecords = await pdfRepository.listAll();
+      pdfPayloads = await fetchManifestPdfPayloads(manifestEntries, existingPdfRecords);
+    } catch (err) {
+      console.warn('[reseed] Contract PDF fetch failed:', err);
+      warnings.push({
+        file: 'contracts',
+        label: 'Contract PDFs',
+        reason: err.message || String(err),
+      });
+    }
+  }
 
   if (pdfPayloads.length) {
     await pdfRepository.bulkSave(pdfPayloads);
@@ -230,9 +319,11 @@ async function performDefaultSeed({ clearExisting = false } = {}) {
   await appMetaRepository.setValue(APP_META_KEYS.DEFAULT_SEED_AT, new Date().toISOString());
 
   return {
-    rows: cleanedRows.length,
-    insuranceRows: insuranceRecords.length,
-    pdfs: manifestEntries.length,
+    rows:           cleanedRows.length,
+    insuranceRows:  insuranceRecords.length,
+    pdfs:           manifestEntries.length,
+    matchedPdfs:    pdfPayloads.length,
+    warnings,
   };
 }
 

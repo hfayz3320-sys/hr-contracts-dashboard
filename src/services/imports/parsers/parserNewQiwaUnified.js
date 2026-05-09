@@ -74,20 +74,72 @@ function normalizeMobile(raw) {
 
 // ── main parser ──────────────────────────────────────────────────────────────
 
+/**
+ * Try several patterns in order, returning the first non-null match.
+ * Used to support both LTR English Qiwa text AND mixed/reversed RTL output
+ * where labels appear in Arabic and/or after the value.
+ */
+function findFirstOf(text, patterns) {
+  for (const pattern of patterns) {
+    const m = findFirst(pattern, text);
+    if (m) return m;
+  }
+  return null;
+}
+
 export function parse(pages, sourceFile) {
   const text = (pages || []).map((p) => String(p || '')).join('\n');
 
-  // Section 1 — contract info
-  const contractNo   = findFirst('Contract number:\\s*(\\d{5,})', text);
-  const contractType = findFirst('Contract type:\\s*([^\\n\\r]+)', text);
-  const startDate    = normalizeDate(findFirst('Commencement date:\\s*([\\d/]+)', text));
-  const endDate      = normalizeDate(findFirst('Contract end date:\\s*([\\d/]+)', text));
+  // ── Section 1 — contract info ─────────────────────────────────────────────
+  // Patterns cover three real Qiwa output styles:
+  //   a) "Contract number: 29714467"             (LTR English)
+  //   b) "رقم العقد: 29714467"                    (Arabic label)
+  //   c) "رقم العقد: 29714467 :number Contract"  (mixed — Arabic + reversed English)
+  const contractNo = findFirstOf(text, [
+    'Contract number:\\s*(\\d{5,})',
+    'رقم العقد:?\\s*(\\d{5,})',
+    '(\\d{5,})\\s*:\\s*number\\s+Contract',     // reversed English
+  ]);
 
-  // Section 3 — second party
-  // IdentityNumber: "ID no.:" appears twice — once for First Party signatory
-  // (section 2) and once for the employee (section 3). Take the LAST match.
+  const contractType = findFirstOf(text, [
+    'Contract type:\\s*([^\\n\\r]+)',
+    'نوع العقد:?\\s*([^\\n\\r]+)',
+  ]);
+
+  const startDate = normalizeDate(findFirstOf(text, [
+    'Commencement date:\\s*([\\d/]+)',
+    'تاريخ مباشرة العمل:?\\s*([\\d/]+)',
+    'تاريخ بداية العقد:?\\s*([\\d/]+)',
+    'تاريخ بدء العقد:?\\s*([\\d/]+)',
+    '([\\d/]{8,10})\\s*:\\s*date\\s+Commencement',
+    '([\\d/]{8,10})\\s*:\\s*date\\s+Starting',
+  ]));
+
+  const endDate = normalizeDate(findFirstOf(text, [
+    'Contract end date:\\s*([\\d/]+)',
+    'تاريخ نهاية العقد:?\\s*([\\d/]+)',
+    'تاريخ انتهاء العقد:?\\s*([\\d/]+)',
+    '([\\d/]{8,10})\\s*:\\s*date\\s+end\\s+Contract',
+  ]));
+
+  // ── Section 3 — second party ──────────────────────────────────────────────
+  // IdentityNumber. Three observed formats:
+  //   "ID no.: 2598101232"          (LTR)
+  //   "رقم الهوية: 2598101232"       (Arabic label)
+  //   "رقم الهوية: 2598101232 .:no ID"  (mixed/reversed)
+  // "ID no.:" appears twice in LTR layouts (First Party + Second Party);
+  // take the LAST match in that case.
+  let identityNo = null;
   const idMatches = [...text.matchAll(/ID no\.:\s*(\d{6,12})/gi)];
-  const identityNo = idMatches.length ? idMatches[idMatches.length - 1][1] : null;
+  if (idMatches.length) {
+    identityNo = idMatches[idMatches.length - 1][1];
+  } else {
+    identityNo = findFirstOf(text, [
+      'رقم الهوية:?\\s*(\\d{6,12})',
+      '(\\d{6,12})\\s*\\.?\\s*:\\s*no\\s+ID',
+      'رقم الإقامة:?\\s*(\\d{6,12})',
+    ]);
+  }
 
   // Passport: only appears in Second Party section
   const passportNo = findFirst('Passport number:\\s*([A-Za-z][A-Za-z0-9]{5,10})', text);
