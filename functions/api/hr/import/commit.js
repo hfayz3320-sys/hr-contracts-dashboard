@@ -10,8 +10,12 @@
  * a fresh jobId is safe (it just produces no new rows on the second run).
  */
 import { applyImport } from '../../../lib/hrUpsert.js';
+import { requireAdmin } from '../../../lib/requireAdmin.js';
 
 export const onRequestPost = async ({ env, request }) => {
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
+
   if (!env.DB) {
     return new Response(JSON.stringify({ error: 'D1 binding "DB" missing on this environment' }),
       { status: 500, headers: { 'content-type': 'application/json' } });

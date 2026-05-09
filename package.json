@@ -13,7 +13,9 @@
     "contracts:manifest": "node scripts/build-contracts-manifest.mjs",
     "postbuild:strip-pii": "node scripts/postbuild-strip-pii.mjs",
     "build:safe": "npm run build && npm run postbuild:strip-pii",
-    "verify:dist-pii": "node scripts/postbuild-strip-pii.mjs --check-only"
+    "verify:dist-pii": "node scripts/postbuild-strip-pii.mjs --check-only",
+    "test:upsert": "node --experimental-sqlite scripts/d1-upsert-tests.mjs",
+    "d1:apply:local": "wrangler d1 migrations apply hr_dashboard_db --local"
   },
   "dependencies": {
     "cors": "^2.8.5",

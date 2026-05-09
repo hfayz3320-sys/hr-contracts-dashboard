@@ -28,6 +28,8 @@ import {
   postImportDryRun,
   postImportCommit,
   postImportRollback,
+  setAdminToken,
+  hasAdminToken,
 } from '../services/api/hrApi';
 
 import { personRepository }                 from '../storage/repositories/personRepository';
@@ -631,6 +633,18 @@ function ProductionDatabaseSection({ activePreview }) {
   const [commitResult, setCommitRes] = React.useState(null);
   const [commitErr, setCommitErr]   = React.useState(null);
   const [rollingBack, setRollingBack] = React.useState(false);
+  const [tokenDraft, setTokenDraft] = React.useState('');
+  const [tokenSaved, setTokenSaved] = React.useState(hasAdminToken());
+
+  function handleSaveToken() {
+    setAdminToken(tokenDraft.trim());
+    setTokenDraft('');
+    setTokenSaved(hasAdminToken());
+  }
+  function handleClearToken() {
+    setAdminToken('');
+    setTokenSaved(false);
+  }
 
   async function refreshSnapshot() {
     setSnapLoad(true);
@@ -717,6 +731,24 @@ function ProductionDatabaseSection({ activePreview }) {
         </div>
       )}
 
+      <div style={{ marginBottom: 12, padding: 10, background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6 }}>
+        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
+          Admin token for write endpoints (sent as <code>Authorization: Bearer …</code>; stored in sessionStorage only).
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="password"
+            value={tokenDraft}
+            onChange={(e) => setTokenDraft(e.target.value)}
+            placeholder={tokenSaved ? '✓ token saved (paste new to replace)' : 'paste admin token'}
+            style={{ flex: 1, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13 }}
+          />
+          <button type="button" className="btn" onClick={handleSaveToken} disabled={!tokenDraft.trim()}>Save</button>
+          {tokenSaved && (
+            <button type="button" className="btn ghost" onClick={handleClearToken}>Clear</button>
+          )}
+        </div>
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" className="btn"
           onClick={handleDryRun} disabled={!activePreview}>

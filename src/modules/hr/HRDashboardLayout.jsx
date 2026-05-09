@@ -33,6 +33,7 @@ import { PAGE_KEYS, getPageBySlug } from '../../security/config/pages';
 import { permissionService } from '../../security/services/permissionService';
 import { localDataService } from '../../services/storage/localDataService';
 import { resolveStartupSnapshot, shouldHideDemoUI } from '../../services/api/productionMode';
+import { snapshotToRows } from '../../services/api/snapshotToRows';
 import { calculateEmployeePageSummary } from '../../services/employees/employeeSummaryService';
 import { pdfImportService } from '../../services/imports/pdfImportService';
 import { insuranceImportService } from '../../services/insurance/insuranceImportService';
@@ -296,28 +297,31 @@ export default function HRDashboardLayout() {
         const startup = await resolveStartupSnapshot();
         if (!cancelled) setProdMode(startup);
 
-        // Step 2 — if we have a real snapshot, surface its source/counts on
-        // the toolbar. The table data continues to be read from IndexedDB
-        // for now (the existing localDataService stores the same content).
+        // Step 2 — if we have a real D1 snapshot, hydrate the dashboard
+        // straight from it: persons → rows, contracts → pdfMap + row fields,
+        // insurance → insuranceRecords, review_queue → reviewItems. This is
+        // the real "load from DB on every startup" the production spec
+        // requires. The existing memos/filters/charts work unchanged because
+        // snapshotToRows() emits the canonical expectedSchema row shape.
         if (startup.mode === 'real' && startup.snapshot) {
-          const job = startup.snapshot.job || {};
-          const dateLabel = job.committed_at
-            ? new Date(job.committed_at).toLocaleString()
-            : '';
-          // setSourceName lives on the dashboard store — pass through the
-          // existing setRowsAndSummary path so consumers stay unchanged.
-          // (When D1-driven hydration of the table view lands, replace
-          // refreshLocalData() with a direct snapshot→state mapper.)
-        }
-
-        // Step 3 — when a snapshot exists OR we're in dev, also load the
-        // local IndexedDB so the existing table memos work. In a clean
-        // production environment with mode 'empty' we still call this; it
-        // returns empty stores and the dashboard renders the production
-        // empty state defined further below.
-        await localDataService.initialize();
-        if (!cancelled) {
-          await refreshLocalData();
+          const projected = snapshotToRows(startup.snapshot);
+          if (!cancelled) {
+            setRowsAndSummary(projected.rows, projected.issues, projected.summary, projected.source);
+            mergePdfMap(projected.pdfMap || {});
+            setInsuranceRecords(projected.insurance || []);
+            setReviewItems(projected.reviewItems || []);
+          }
+          // We deliberately DO NOT call localDataService.initialize() in
+          // production — the database is the authoritative source and we
+          // don't want stale IndexedDB rows to overwrite what we just
+          // hydrated.
+        } else {
+          // Step 3 — dev fallback: read whatever IndexedDB has (sample
+          // data in dev, empty in production-empty mode).
+          await localDataService.initialize();
+          if (!cancelled) {
+            await refreshLocalData();
+          }
         }
       } catch (error) {
         console.error(error);

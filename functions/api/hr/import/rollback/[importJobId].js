@@ -9,8 +9,12 @@
  *   - import_jobs.status → 'rolled_back'
  */
 import { rollbackImport } from '../../../../lib/hrUpsert.js';
+import { requireAdmin } from '../../../../lib/requireAdmin.js';
 
-export const onRequestPost = async ({ env, params }) => {
+export const onRequestPost = async ({ env, request, params }) => {
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
+
   if (!env.DB) {
     return new Response(JSON.stringify({ error: 'D1 binding "DB" missing on this environment' }),
       { status: 500, headers: { 'content-type': 'application/json' } });

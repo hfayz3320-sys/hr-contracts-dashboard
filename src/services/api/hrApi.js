@@ -16,6 +16,28 @@
 
 const BASE = '/api/hr';
 
+// ── admin token storage ────────────────────────────────────────────────────
+// The token never leaves the browser; it is read from sessionStorage and
+// attached to every write request. The Import Dashboard's "0 — Production
+// database" panel calls setAdminToken() when the user pastes one in.
+const ADMIN_TOKEN_KEY = 'hr.adminToken';
+function getAdminToken() {
+  try { return sessionStorage.getItem(ADMIN_TOKEN_KEY) || ''; } catch { return ''; }
+}
+export function setAdminToken(token) {
+  try {
+    if (token) sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+    else sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch { /* sessionStorage unavailable in some environments */ }
+}
+export function hasAdminToken() {
+  return Boolean(getAdminToken());
+}
+function authHeaders() {
+  const t = getAdminToken();
+  return t ? { 'authorization': `Bearer ${t}` } : {};
+}
+
 async function jsonOrThrow(res) {
   const ct = res.headers.get('content-type') || '';
   const isJson = /application\/json/i.test(ct);
@@ -69,7 +91,7 @@ export async function fetchCurrentSnapshot() {
 export async function postImportDryRun(payload) {
   const res = await fetch(`${BASE}/import/dry-run`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });
   return jsonOrThrow(res);
@@ -78,7 +100,7 @@ export async function postImportDryRun(payload) {
 export async function postImportCommit(payload) {
   const res = await fetch(`${BASE}/import/commit`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });
   return jsonOrThrow(res);
@@ -87,7 +109,7 @@ export async function postImportCommit(payload) {
 export async function postImportRollback(importJobId) {
   const res = await fetch(`${BASE}/import/rollback/${encodeURIComponent(importJobId)}`, {
     method: 'POST',
-    headers: { 'accept': 'application/json' },
+    headers: { 'accept': 'application/json', ...authHeaders() },
   });
   return jsonOrThrow(res);
 }
