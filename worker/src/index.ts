@@ -16,6 +16,7 @@ import { userRoutes } from './routes/users';
 import { debugRoutes } from './routes/debug';
 import { employeeDocumentRoutes } from './routes/employee-documents';
 import { employeeTransactionRoutes } from './routes/employee-transactions';
+import { hrConfigRoutes } from './routes/hr-config';
 
 const app = new Hono<AppContext>();
 
@@ -77,6 +78,8 @@ app.route('/', debugRoutes);
 // `employeeRoutes` does not own these paths, so order is informational only.
 app.route('/', employeeDocumentRoutes);
 app.route('/', employeeTransactionRoutes);
+// Phase 6A-1 — HR configuration foundation.
+app.route('/', hrConfigRoutes);
 
 app.notFound((c) => c.json({ error: 'NOT_FOUND', message: 'No route matched' }, 404));
 

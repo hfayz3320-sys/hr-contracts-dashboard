@@ -424,3 +424,23 @@ export type ImportCounts = {
   review: number;
   error: number;
 };
+
+// ============================================================================
+// Phase 6A — HR Configuration foundation.
+// Domain types are re-exported from api-contract.ts (single source of truth
+// via zod schemas there). This keeps domain.ts as the FE-friendly import
+// path while api-contract.ts owns the runtime validation.
+// ============================================================================
+export type {
+  HrOrgUnit, HrOrgUnitNode,
+  HrJobTitle, HrTrade, HrGrade, HrPosition,
+  HrContractType, HrPayrollComponent,
+  HrMedicalProvider, HrMedicalPolicyClass,
+  HrDocumentType, HrTransactionType, HrActivityType,
+  HrLearningCategory, HrSocialInsuranceRule,
+  HrConfigBundle,
+  HrOrgUnitCreateRequest, HrOrgUnitPatchRequest,
+  HrJobTitleCreateRequest, HrJobTitlePatchRequest,
+  HrPositionCreateRequest, HrPositionPatchRequest,
+  HrGradeCreateRequest, HrGradePatchRequest,
+} from './api-contract';

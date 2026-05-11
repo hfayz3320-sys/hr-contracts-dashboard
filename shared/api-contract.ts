@@ -904,6 +904,307 @@ export type AppUserDeactivateRequest = z.infer<typeof appUserDeactivateRequest>;
 export type ReviewApproveRequest    = z.infer<typeof reviewApproveRequest>;
 export type ReviewRejectRequest     = z.infer<typeof reviewRejectRequest>;
 
+// ============================================================================
+// Phase 6A — HR Configuration foundation schemas.
+//
+// Each config table follows the same row shape:
+//   id, code, name, name_ar?, ... config-specific fields,
+//   active, displayOrder, createdAt, createdBy, updatedAt, updatedBy.
+//
+// `code` is the stable business key (UPPER_SNAKE). Seed idempotency, FE
+// option lists, and future cross-environment linkage use `code` — NOT `id`.
+// Config-to-config FKs use `id` for relational integrity inside the DB.
+// ============================================================================
+
+const audited = {
+  createdAt: z.string(),
+  createdBy: z.string(),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+} as const;
+const configRowBase = z.object({
+  id: z.string(),
+  code: z.string().min(1).max(64),
+  name: z.string().min(1),
+  nameAr: z.string().nullable().optional(),
+  active: z.boolean(),
+  displayOrder: z.number().int(),
+  ...audited,
+});
+
+// ---- hr_org_units ----------------------------------------------------------
+export const hrOrgUnitTypeSchema = z.enum([
+  'legal_entity','department','section','unit','site','project',
+]);
+export const hrOrgUnitSchema = configRowBase.extend({
+  type: hrOrgUnitTypeSchema,
+  parentId: z.string().nullable(),
+  level: z.number().int(),
+  managerEmployeeId: z.string().nullable(),
+  siteCode: z.string().nullable().optional(),
+  projectCode: z.string().nullable().optional(),
+});
+export const hrOrgUnitNodeSchema: z.ZodType<HrOrgUnitNode> = hrOrgUnitSchema.extend({
+  children: z.lazy(() => z.array(hrOrgUnitNodeSchema)),
+});
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+export interface HrOrgUnitNode extends z.infer<typeof hrOrgUnitSchema> {
+  children: HrOrgUnitNode[];
+}
+
+// ---- hr_job_titles ---------------------------------------------------------
+export const hrJobTitleSchema = configRowBase.extend({
+  category: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+});
+
+// ---- hr_trades -------------------------------------------------------------
+export const hrTradeSchema = configRowBase.extend({
+  category: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+});
+
+// ---- hr_grades -------------------------------------------------------------
+export const hrGradeSchema = configRowBase.extend({
+  level: z.number().int(),
+  salaryBandMin: z.number().nullable().optional(),
+  salaryBandMax: z.number().nullable().optional(),
+  currency: z.string(),
+});
+
+// ---- hr_positions ----------------------------------------------------------
+// Positions don't carry a separate `name` — their identity is the `code`
+// + the (job_title × org_unit) it references. UI labels are derived.
+export const hrPositionSchema = z.object({
+  id: z.string(),
+  code: z.string().min(1).max(64),
+  jobTitleId: z.string(),
+  orgUnitId: z.string(),
+  gradeId: z.string().nullable(),
+  reportsToPositionId: z.string().nullable(),
+  headcountAllowed: z.number().int(),
+  active: z.boolean(),
+  displayOrder: z.number().int(),
+  ...audited,
+});
+
+// ---- hr_contract_types -----------------------------------------------------
+export const hrContractTypeSchema = configRowBase.extend({
+  templateCode: z.string().nullable().optional(),
+  requiresEndDate: z.boolean(),
+  requiresSourcePdf: z.boolean(),
+  requiresSalaryAttach: z.boolean(),
+  maxRenewals: z.number().int().nullable(),
+  defaultTermMonths: z.number().int().nullable(),
+});
+
+// ---- hr_payroll_components -------------------------------------------------
+export const hrPayrollComponentKindSchema = z.enum([
+  'earning','deduction','reimbursement','allowance',
+]);
+export const hrPayrollComponentSchema = configRowBase.extend({
+  kind: hrPayrollComponentKindSchema,
+  taxable: z.boolean(),
+  includedInGosi: z.boolean(),
+  includedInEos: z.boolean(),
+  defaultCurrency: z.string(),
+});
+
+// ---- hr_medical_providers --------------------------------------------------
+export const hrMedicalProviderSchema = configRowBase.extend({
+  defaultPolicyYearMonths: z.number().int().nullable(),
+  contactPhone: z.string().nullable().optional(),
+  contactEmail: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
+
+// ---- hr_medical_policy_classes ---------------------------------------------
+export const hrMedicalPolicyClassSchema = configRowBase.extend({
+  tierLevel: z.number().int(),
+  description: z.string().nullable().optional(),
+});
+
+// ---- hr_document_types -----------------------------------------------------
+export const hrDocumentTypeSchema = configRowBase.extend({
+  requiresDocNumber: z.boolean(),
+  requiresExpiresAt: z.boolean(),
+  requiresSourceFile: z.boolean(),
+  allowHistory: z.boolean(),
+  defaultReviewRequired: z.boolean(),
+  warningBeforeExpiryDays: z.number().int().nullable(),
+  description: z.string().nullable().optional(),
+});
+
+// ---- hr_transaction_types --------------------------------------------------
+export const hrTransactionCategorySchema = z.enum([
+  'travel','identity','time_off','compensation','disciplinary',
+  'admin','contract','insurance','learning','movement','exit','other',
+]);
+export const hrAuditSeveritySchema = z.enum(['info','warning','critical']);
+export const hrTransactionTypeSchema = configRowBase.extend({
+  category: hrTransactionCategorySchema,
+  payloadSchemaVersion: z.number().int(),
+  requiresDocTypeId: z.string().nullable(),
+  defaultReviewRequired: z.boolean(),
+  allowedStatuses: z.array(z.string()),
+  defaultStatus: z.string(),
+  auditSeverity: hrAuditSeveritySchema,
+});
+
+// ---- hr_activity_types -----------------------------------------------------
+export const hrActivityCategorySchema = z.enum([
+  'communication','task','reminder','review','other',
+]);
+export const hrActivityPrioritySchema = z.enum(['low','normal','high','urgent']);
+export const hrActivityTypeSchema = configRowBase.extend({
+  category: hrActivityCategorySchema,
+  defaultDueDays: z.number().int().nullable(),
+  requiresAssignee: z.boolean(),
+  defaultPriority: hrActivityPrioritySchema,
+});
+
+// ---- hr_learning_categories ------------------------------------------------
+export const hrLearningCategorySchema = configRowBase.extend({
+  requiresExpiry: z.boolean(),
+  requiresIssuer: z.boolean(),
+  description: z.string().nullable().optional(),
+});
+
+// ---- hr_social_insurance_rules ---------------------------------------------
+export const hrSocialInsuranceAppliesToSchema = z.enum(['saudi','non_saudi','any']);
+export const hrSocialInsuranceRuleSchema = configRowBase.extend({
+  appliesTo: hrSocialInsuranceAppliesToSchema,
+  employerRatePct: z.number().nullable(),
+  employeeRatePct: z.number().nullable(),
+  contributionCapSar: z.number().nullable(),
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable(),
+  requiresSourceDoc: z.boolean(),
+  notes: z.string().nullable().optional(),
+});
+
+// ---- List + bundle responses ----------------------------------------------
+function listResp<T extends z.ZodTypeAny>(item: T) {
+  return z.object({ items: z.array(item) });
+}
+export const hrOrgUnitsListResponse           = listResp(hrOrgUnitSchema);
+export const hrOrgUnitsTreeResponse           = z.object({ items: z.array(hrOrgUnitNodeSchema) });
+export const hrJobTitlesListResponse          = listResp(hrJobTitleSchema);
+export const hrPositionsListResponse          = listResp(hrPositionSchema);
+export const hrGradesListResponse             = listResp(hrGradeSchema);
+export const hrTradesListResponse             = listResp(hrTradeSchema);
+export const hrContractTypesListResponse      = listResp(hrContractTypeSchema);
+export const hrPayrollComponentsListResponse  = listResp(hrPayrollComponentSchema);
+export const hrLearningCategoriesListResponse = listResp(hrLearningCategorySchema);
+export const hrMedicalProvidersListResponse   = listResp(hrMedicalProviderSchema);
+export const hrMedicalPolicyClassesListResponse = listResp(hrMedicalPolicyClassSchema);
+export const hrSocialInsuranceRulesListResponse = listResp(hrSocialInsuranceRuleSchema);
+export const hrDocumentTypesListResponse      = listResp(hrDocumentTypeSchema);
+export const hrTransactionTypesListResponse   = listResp(hrTransactionTypeSchema);
+export const hrActivityTypesListResponse      = listResp(hrActivityTypeSchema);
+
+export const hrConfigBundleResponse = z.object({
+  orgUnits:             z.array(hrOrgUnitSchema),
+  jobTitles:            z.array(hrJobTitleSchema),
+  positions:            z.array(hrPositionSchema),
+  grades:               z.array(hrGradeSchema),
+  trades:               z.array(hrTradeSchema),
+  contractTypes:        z.array(hrContractTypeSchema),
+  payrollComponents:    z.array(hrPayrollComponentSchema),
+  learningCategories:   z.array(hrLearningCategorySchema),
+  medicalProviders:     z.array(hrMedicalProviderSchema),
+  medicalPolicyClasses: z.array(hrMedicalPolicyClassSchema),
+  socialInsuranceRules: z.array(hrSocialInsuranceRuleSchema),
+  documentTypes:        z.array(hrDocumentTypeSchema),
+  transactionTypes:     z.array(hrTransactionTypeSchema),
+  activityTypes:        z.array(hrActivityTypeSchema),
+});
+
+// ---- Create / Patch request schemas ---------------------------------------
+// Codes are immutable post-create; the patch schemas omit `code`.
+const createBase = { code: z.string().min(2).max(64).regex(/^[A-Z][A-Z0-9_]*$/), name: z.string().min(1) };
+
+export const hrOrgUnitCreateRequest = z.object({
+  ...createBase,
+  nameAr: z.string().optional(),
+  type: hrOrgUnitTypeSchema,
+  parentId: z.string().optional().nullable(),
+  managerEmployeeId: z.string().optional().nullable(),
+  siteCode: z.string().optional().nullable(),
+  projectCode: z.string().optional().nullable(),
+  displayOrder: z.number().int().optional(),
+});
+export const hrOrgUnitPatchRequest = hrOrgUnitCreateRequest
+  .omit({ code: true })
+  .partial()
+  .extend({ active: z.boolean().optional() });
+
+export const hrJobTitleCreateRequest = z.object({
+  ...createBase,
+  nameAr: z.string().optional(),
+  category: z.string().optional(),
+  description: z.string().optional(),
+  displayOrder: z.number().int().optional(),
+});
+export const hrJobTitlePatchRequest = hrJobTitleCreateRequest
+  .omit({ code: true })
+  .partial()
+  .extend({ active: z.boolean().optional() });
+
+// Positions create — `code` IS the identifier; no separate name on positions.
+export const hrPositionCreateRequest = z.object({
+  code: z.string().min(2).max(64).regex(/^[A-Z][A-Z0-9_]*$/),
+  jobTitleId: z.string(),
+  orgUnitId: z.string(),
+  gradeId: z.string().optional().nullable(),
+  reportsToPositionId: z.string().optional().nullable(),
+  headcountAllowed: z.number().int().min(0).optional(),
+  displayOrder: z.number().int().optional(),
+});
+export const hrPositionPatchRequest = hrPositionCreateRequest
+  .omit({ code: true })
+  .partial()
+  .extend({ active: z.boolean().optional() });
+
+export const hrGradeCreateRequest = z.object({
+  ...createBase,
+  nameAr: z.string().optional(),
+  level: z.number().int(),
+  salaryBandMin: z.number().optional().nullable(),
+  salaryBandMax: z.number().optional().nullable(),
+  currency: z.string().optional(),
+  displayOrder: z.number().int().optional(),
+});
+export const hrGradePatchRequest = hrGradeCreateRequest
+  .omit({ code: true })
+  .partial()
+  .extend({ active: z.boolean().optional() });
+
+// ---- Types ----------------------------------------------------------------
+export type HrOrgUnit             = z.infer<typeof hrOrgUnitSchema>;
+export type HrJobTitle            = z.infer<typeof hrJobTitleSchema>;
+export type HrTrade               = z.infer<typeof hrTradeSchema>;
+export type HrGrade               = z.infer<typeof hrGradeSchema>;
+export type HrPosition            = z.infer<typeof hrPositionSchema>;
+export type HrContractType        = z.infer<typeof hrContractTypeSchema>;
+export type HrPayrollComponent    = z.infer<typeof hrPayrollComponentSchema>;
+export type HrMedicalProvider     = z.infer<typeof hrMedicalProviderSchema>;
+export type HrMedicalPolicyClass  = z.infer<typeof hrMedicalPolicyClassSchema>;
+export type HrDocumentType        = z.infer<typeof hrDocumentTypeSchema>;
+export type HrTransactionType     = z.infer<typeof hrTransactionTypeSchema>;
+export type HrActivityType        = z.infer<typeof hrActivityTypeSchema>;
+export type HrLearningCategory    = z.infer<typeof hrLearningCategorySchema>;
+export type HrSocialInsuranceRule = z.infer<typeof hrSocialInsuranceRuleSchema>;
+export type HrConfigBundle        = z.infer<typeof hrConfigBundleResponse>;
+export type HrOrgUnitCreateRequest    = z.infer<typeof hrOrgUnitCreateRequest>;
+export type HrOrgUnitPatchRequest     = z.infer<typeof hrOrgUnitPatchRequest>;
+export type HrJobTitleCreateRequest   = z.infer<typeof hrJobTitleCreateRequest>;
+export type HrJobTitlePatchRequest    = z.infer<typeof hrJobTitlePatchRequest>;
+export type HrPositionCreateRequest   = z.infer<typeof hrPositionCreateRequest>;
+export type HrPositionPatchRequest    = z.infer<typeof hrPositionPatchRequest>;
+export type HrGradeCreateRequest      = z.infer<typeof hrGradeCreateRequest>;
+export type HrGradePatchRequest       = z.infer<typeof hrGradePatchRequest>;
+
 // ---------- endpoint catalogue ---------------------------------------------
 
 export const API_PATHS = {
@@ -947,4 +1248,25 @@ export const API_PATHS = {
   employeeDocument:     (id: string, docId: string)   => `/api/employees/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`,
   employeeTransactions: (id: string)                  => `/api/employees/${encodeURIComponent(id)}/transactions`,
   employeeTransaction:  (id: string, txnId: string)   => `/api/employees/${encodeURIComponent(id)}/transactions/${encodeURIComponent(txnId)}`,
+  // Phase 6A-1 — HR Configuration foundation.
+  hrConfig:                  '/api/config/hr',
+  hrConfigOrgUnits:          '/api/config/org-units',
+  hrConfigOrgUnitsTree:      '/api/config/org-units/tree',
+  hrConfigOrgUnit:           (id: string) => `/api/config/org-units/${encodeURIComponent(id)}`,
+  hrConfigJobTitles:         '/api/config/job-titles',
+  hrConfigJobTitle:          (id: string) => `/api/config/job-titles/${encodeURIComponent(id)}`,
+  hrConfigPositions:         '/api/config/positions',
+  hrConfigPosition:          (id: string) => `/api/config/positions/${encodeURIComponent(id)}`,
+  hrConfigGrades:            '/api/config/grades',
+  hrConfigGrade:             (id: string) => `/api/config/grades/${encodeURIComponent(id)}`,
+  hrConfigTrades:            '/api/config/trades',
+  hrConfigContractTypes:     '/api/config/contract-types',
+  hrConfigPayrollComponents: '/api/config/payroll-components',
+  hrConfigLearningCategories:'/api/config/learning-categories',
+  hrConfigMedicalProviders:  '/api/config/medical-providers',
+  hrConfigMedicalPolicyClasses:'/api/config/medical-policy-classes',
+  hrConfigSocialInsuranceRules:'/api/config/social-insurance-rules',
+  hrConfigDocumentTypes:     '/api/config/document-types',
+  hrConfigTransactionTypes:  '/api/config/transaction-types',
+  hrConfigActivityTypes:     '/api/config/activity-types',
 } as const;
