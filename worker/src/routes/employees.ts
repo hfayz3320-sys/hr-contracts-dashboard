@@ -9,6 +9,9 @@ import {
 import { listContractsForEmployee } from '../db/repo-contracts';
 import { listInsuranceForEmployee } from '../db/repo-insurance';
 import { listAuditForTarget } from '../db/repo-audit';
+import { listDocumentsForEmployee } from '../db/repo-employee-documents';
+import { listTransactionsForEmployee } from '../db/repo-employee-transactions';
+import { computeEmployeeDataQuality } from '../lib/employee-data-quality';
 import { requireAuth, requireAdmin, getActorEmail } from '../lib/auth';
 import { writeAudit } from '../lib/audit';
 import { employeePatchRequest } from '@shared/api-contract';
@@ -23,6 +26,19 @@ employeeRoutes.get('/api/employees', async (c) => {
   return c.json(result);
 });
 
+/**
+ * GET /api/employees/:id — Phase 4A additively extended.
+ *
+ * Existing callers receive `{ employee, contracts, insurance, audit }`
+ * unchanged. Phase 4A appends `documents`, `transactions`, and
+ * `dataQuality` so the front end's Employee 360 view can render from a
+ * single fetch. None of the new fields break older clients (extra keys
+ * in a JSON body are tolerated by every consumer we control).
+ *
+ * `documents` / `transactions` will be EMPTY arrays until migration 0005
+ * is applied and rows are written by the new routes — there is no
+ * synthesis from contracts/insurance.
+ */
 employeeRoutes.get('/api/employees/:id', async (c) => {
   const id = c.req.param('id');
   if (!id) return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
@@ -30,12 +46,44 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
   if (!employee) {
     return c.json({ error: 'NOT_FOUND', message: `Employee ${id} not found` }, 404);
   }
-  const [contracts, insurance, audit] = await Promise.all([
+  // Pre-migration safety: if 0005 hasn't been applied yet, the document /
+  // transaction queries throw "no such table". Catch and degrade to empty
+  // arrays so the older 360 surface keeps working in environments that
+  // haven't run the migration yet.
+  const safeList = async <T,>(fn: () => Promise<T[]>): Promise<T[]> => {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/no such table/i.test(msg)) return [];
+      throw err;
+    }
+  };
+
+  const [contracts, insurance, audit, documents, transactions] = await Promise.all([
     listContractsForEmployee(c.env, id),
     listInsuranceForEmployee(c.env, id),
     listAuditForTarget(c.env, id),
+    safeList(() => listDocumentsForEmployee(c.env, id)),
+    safeList(() => listTransactionsForEmployee(c.env, id)),
   ]);
-  return c.json({ employee, contracts, insurance, audit });
+
+  const dataQuality = computeEmployeeDataQuality({
+    employee,
+    contracts,
+    insurance,
+    documents,
+  });
+
+  return c.json({
+    employee,
+    contracts,
+    insurance,
+    audit,
+    documents,
+    transactions,
+    dataQuality,
+  });
 });
 
 /**

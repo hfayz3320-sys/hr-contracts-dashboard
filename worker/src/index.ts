@@ -14,6 +14,8 @@ import { sourceFilesRoutes } from './routes/source-files';
 import { meRoutes } from './routes/me';
 import { userRoutes } from './routes/users';
 import { debugRoutes } from './routes/debug';
+import { employeeDocumentRoutes } from './routes/employee-documents';
+import { employeeTransactionRoutes } from './routes/employee-transactions';
 
 const app = new Hono<AppContext>();
 
@@ -71,6 +73,10 @@ app.route('/', auditRoutes);
 app.route('/', sourceFilesRoutes);
 app.route('/', importRoutes);
 app.route('/', debugRoutes);
+// Phase 4A — Employee 360. The nested routes must mount BEFORE
+// `employeeRoutes` does not own these paths, so order is informational only.
+app.route('/', employeeDocumentRoutes);
+app.route('/', employeeTransactionRoutes);
 
 app.notFound((c) => c.json({ error: 'NOT_FOUND', message: 'No route matched' }, 404));
 
