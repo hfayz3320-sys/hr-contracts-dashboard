@@ -2,6 +2,7 @@ import { Navigate, type RouteObject } from 'react-router-dom';
 import { AppShell } from '@/components/layout/AppShell';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { EmployeesPage } from '@/pages/EmployeesPage';
+import { EmployeeProfilePage } from '@/pages/EmployeeProfilePage';
 import { ContractsPage } from '@/pages/ContractsPage';
 import { InsurancePage } from '@/pages/InsurancePage';
 import { ImportsPage } from '@/pages/ImportsPage';
@@ -20,6 +21,7 @@ export const routeTree: RouteObject[] = [
       { index: true, element: <Navigate to={routes.dashboard} replace /> },
       { path: 'dashboard', element: <DashboardPage /> },
       { path: 'employees', element: <EmployeesPage /> },
+      { path: 'employees/:id', element: <EmployeeProfilePage /> },
       { path: 'contracts', element: <ContractsPage /> },
       { path: 'insurance', element: <InsurancePage /> },
       { path: 'imports',  element: <ImportsPage /> },

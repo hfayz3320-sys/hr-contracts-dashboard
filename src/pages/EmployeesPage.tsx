@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Search, Pencil, RefreshCw, AlertTriangle, Download } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Pencil, RefreshCw, Download, Users, UserCheck, UserX, ShieldAlert } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -12,9 +13,12 @@ import { EntityEditDialog, type EntityEditField } from '@/components/common/Enti
 import { useDrawerParam } from '@/lib/hooks/use-drawer-param';
 import { useMe } from '@/lib/api/use-me';
 import { useEmployees, usePatchEmployee } from '@/lib/api/hooks';
+import { employeeRoute } from '@/lib/routes';
 import { employeeColumns } from '@/features/employees/columns';
 import { EmployeeDrawer } from '@/features/employees/EmployeeDrawer';
 import { EmployeeFiltersDrawer } from '@/features/employees/EmployeeFilters';
+import { CountCard } from '@/components/ui-foundation/CountCard';
+import { ApiErrorState } from '@/components/common/ApiErrorState';
 import {
   emptyEmployeeFilters,
   countEmployeeFilters,
@@ -59,7 +63,8 @@ export function EmployeesPage() {
   const empQuery = useEmployees();
   // Stable-reference memo so downstream `useMemo` deps don't churn.
   const employees: Employee[] = useMemo(() => empQuery.data?.items ?? [], [empQuery.data]);
-  const { open: drawerOpen, id, openDrawer, closeDrawer } = useDrawerParam('emp');
+  const navigate = useNavigate();
+  const { open: drawerOpen, id, closeDrawer } = useDrawerParam('emp');
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<EmployeeFilterValues>(emptyEmployeeFilters);
@@ -78,6 +83,15 @@ export function EmployeesPage() {
       return true;
     });
   }, [employees, search, filters]);
+
+  // Summary stats — feed the CountCard strip above the table.
+  const summary = useMemo(() => {
+    const total = employees.length;
+    const active = employees.filter((e) => e.status === 'active').length;
+    const inactive = total - active;
+    const missingIdentity = employees.filter((e) => !e.identityNumber).length;
+    return { total, active, inactive, missingIdentity };
+  }, [employees]);
 
   const selected = id ? employees.find((e) => e.id === id) ?? null : null;
   const editing = editingId ? employees.find((e) => e.id === editingId) ?? null : null;
@@ -156,44 +170,66 @@ export function EmployeesPage() {
         }
       />
 
-      {empQuery.error ? (
-        <div className="mb-4 rounded-md border border-status-expired/40 bg-status-expired-soft px-4 py-3 text-sm">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 text-status-expired mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-status-expired">Failed to load employees</div>
-              <div className="text-xs text-muted-foreground mt-1 break-all">
-                {String(empQuery.error.message ?? empQuery.error)}
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2 h-7"
-                onClick={() => empQuery.refetch()}
-              >
-                <RefreshCw className="h-3 w-3" /> Retry
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {empQuery.error && employees.length === 0 ? (
+        <ApiErrorState
+          title="Cannot load employees"
+          error={empQuery.error}
+          onRetry={async () => { await empQuery.refetch(); }}
+        />
+      ) : (
+      <>
+      {/* Summary strip — 4 clickable count cards. Wholly hidden during the
+          full-page error state above; otherwise they read live counts even
+          when filters narrow the table below. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <CountCard
+          label="Total Employees"
+          value={summary.total}
+          icon={Users}
+          tone="info"
+          hint={empQuery.isFetching ? 'Refreshing…' : 'In database'}
+        />
+        <CountCard
+          label="Active"
+          value={summary.active}
+          icon={UserCheck}
+          tone="active"
+          hint={summary.total > 0 ? `${Math.round((summary.active / summary.total) * 100)}% of total` : '—'}
+        />
+        <CountCard
+          label="Inactive"
+          value={summary.inactive}
+          icon={UserX}
+          tone="missing"
+          hint="status = inactive"
+        />
+        <CountCard
+          label="Missing identity"
+          value={summary.missingIdentity}
+          icon={ShieldAlert}
+          tone={summary.missingIdentity > 0 ? 'expired' : 'active'}
+          hint={summary.missingIdentity > 0 ? 'Needs review' : 'All clean'}
+        />
+      </div>
 
       <SelectableDataTable
         data={filtered}
         columns={columnsWithEdit}
-        onRowClick={(row) => openDrawer(row.id)}
+        onRowClick={(row) => navigate(employeeRoute(row.id))}
         selectedIds={selectedIds}
         onSelectionChange={setSelectedIds}
         emptyMessage={
           empQuery.isLoading
             ? 'Loading…'
             : empQuery.error
-              ? 'Data unavailable — fix the error above and retry.'
+              ? 'Stale cache shown — retry to refresh.'
               : employees.length === 0
                 ? 'No employees in the database yet. Use Import Center to load employees.'
                 : 'No employees match your filters.'
         }
       />
+      </>
+      )}
 
       <BulkActionBar
         selectedCount={selectedIds.size}

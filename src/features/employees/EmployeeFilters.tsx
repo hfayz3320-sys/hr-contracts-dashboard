@@ -38,6 +38,7 @@ export function EmployeeFiltersDrawer({
       open={open}
       onOpenChange={onOpenChange}
       title="Filter employees"
+      description="Filter the employee list by status, department, and other criteria."
       activeCount={countEmployeeFilters(values)}
       onApply={() => onApply(values)}
       onReset={onReset}
