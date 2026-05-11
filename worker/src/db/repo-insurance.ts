@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import type { Insurance, InsuranceStatus } from '@shared/domain';
 import { buildEmployeeSummaryMap } from './employee-summary';
+import { computeInsuranceStatus } from '../lib/insurance-status';
 
 type InsuranceRow = {
   id: string;
@@ -17,7 +18,33 @@ type InsuranceRow = {
   created_at: string;
 };
 
+/**
+ * Map a D1 row to the API-facing Insurance shape.
+ *
+ * Phase 3C-2: `status` is now ALWAYS computed at read time from the
+ * authoritative date fields (identityNumber, policyNumber, startDate,
+ * endDate, current date) via `computeInsuranceStatus`. The stored
+ * `insurance_policies.status` column is treated as a historical snapshot
+ * of what the import / last backfill computed — it is no longer the
+ * source of truth for dashboards or list responses.
+ *
+ * Why: previously the stored column drifted whenever today crossed an
+ * `end_date` without something triggering a recompute. Phase 3C-1 (the
+ * backfill) fixed the snapshot but left the drift problem unresolved.
+ * Computing on read closes that gap. The stored column is preserved (no
+ * migration needed) but ignored at the boundary.
+ *
+ * Note: this returns the COMPUTED value as `status`. We keep the row's
+ * other date fields exactly as stored so the UI can show the user the
+ * raw start/end and explain how status was derived.
+ */
 function rowToInsurance(r: InsuranceRow): Insurance {
+  const computed = computeInsuranceStatus({
+    identityNumber: r.identity_number,
+    policyNumber: r.policy_number,
+    startDate: r.start_date,
+    endDate: r.end_date,
+  });
   return {
     id: r.id,
     ...(r.employee_id != null ? { employeeId: r.employee_id } : {}),
@@ -27,7 +54,7 @@ function rowToInsurance(r: InsuranceRow): Insurance {
     provider: r.provider,
     startDate: r.start_date,
     endDate: r.end_date,
-    status: r.status,
+    status: computed,
     matched: r.matched === 1,
     ...(r.unmatched_reason != null
       ? { unmatchedReason: r.unmatched_reason as Insurance['unmatchedReason'] }

@@ -129,6 +129,17 @@ export function InsurancePage() {
   ).length;
   const failedQuery = insQuery.error ?? null;
 
+  // Phase 3C-2 honesty note. The Bupa CCHI export does not include an
+  // explicit policy expiry date column, so `endDate` in production is
+  // the import-time fallback (`startDate + 1 year`). Status is now
+  // recomputed at read time against today's date, so a row will flip
+  // from `active` to `expired` automatically on the day the synthetic
+  // window closes — but admins should know that "active" means
+  // "within one year of the policy's effective date in the source
+  // file", not a live confirmation from the insurer.
+  const STATUS_DERIVATION_NOTE =
+    'Insurance status is derived from policy effective date + 1 year because the Bupa CCHI export does not include an explicit expiry date.';
+
   return (
     <div>
       <PageHeader
@@ -198,6 +209,11 @@ export function InsurancePage() {
           </div>
         </div>
       ) : null}
+
+      <div className="mb-4 rounded-md border border-status-info/30 bg-status-info-soft px-4 py-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">Status is computed:</span>{' '}
+        {STATUS_DERIVATION_NOTE}
+      </div>
 
       <SelectableDataTable
         data={filtered}

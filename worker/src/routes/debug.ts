@@ -31,6 +31,36 @@ debugRoutes.get('/api/debug/counts', requireAdmin, async (c) => {
     return r?.n ?? 0;
   }
 
+  // Phase 3C-2 insurance status reconciliation.
+  //
+  // The insurance buckets below DO NOT trust the stored
+  // `insurance_policies.status` column. That column is a historical
+  // snapshot from import / last backfill — it drifts the moment today
+  // crosses any policy's `end_date` without a fresh recompute. Instead
+  // we evaluate the same predicate `computeInsuranceStatus()` runs in
+  // the worker's read path, expressed directly in SQL:
+  //
+  //   missing  = identityNumber / policyNumber / startDate is empty
+  //   expired  = critical fields present AND COALESCE(end_date,
+  //              start_date+1y) < today
+  //   active   = critical fields present AND COALESCE(end_date,
+  //              start_date+1y) >= today
+  //
+  // SQLite's `date(start_date, '+1 year')` modifier supplies the
+  // documented Bupa-CCHI fallback (the source XLSX exports no explicit
+  // expiry date). These three predicates partition the table, so
+  // missing + expired + active == total.
+  const INSURANCE_CRITICAL_PRESENT =
+    "identity_number IS NOT NULL AND identity_number != '' " +
+    "AND policy_number IS NOT NULL AND policy_number != '' " +
+    'AND start_date IS NOT NULL';
+  const INSURANCE_EFFECTIVE_END =
+    "COALESCE(end_date, date(start_date, '+1 year'))";
+
+  const insuranceActiveSql = `SELECT COUNT(*) AS n FROM insurance_policies WHERE ${INSURANCE_CRITICAL_PRESENT} AND ${INSURANCE_EFFECTIVE_END} >= date('now')`;
+  const insuranceExpiredSql = `SELECT COUNT(*) AS n FROM insurance_policies WHERE ${INSURANCE_CRITICAL_PRESENT} AND ${INSURANCE_EFFECTIVE_END} < date('now')`;
+  const insuranceMissingSql = `SELECT COUNT(*) AS n FROM insurance_policies WHERE NOT (${INSURANCE_CRITICAL_PRESENT})`;
+
   // Count every operational table the dashboard reads. Each query is a
   // pure COUNT — no row data leaves D1.
   const [
@@ -60,9 +90,9 @@ debugRoutes.get('/api/debug/counts', requireAdmin, async (c) => {
     scalar("SELECT COUNT(*) AS n FROM contracts WHERE status = 'active'"),
     scalar("SELECT COUNT(*) AS n FROM contracts WHERE status = 'expired'"),
     scalar('SELECT COUNT(*) AS n FROM insurance_policies'),
-    scalar("SELECT COUNT(*) AS n FROM insurance_policies WHERE status = 'active'"),
-    scalar("SELECT COUNT(*) AS n FROM insurance_policies WHERE status = 'expired'"),
-    scalar("SELECT COUNT(*) AS n FROM insurance_policies WHERE status = 'missing'"),
+    scalar(insuranceActiveSql),
+    scalar(insuranceExpiredSql),
+    scalar(insuranceMissingSql),
     scalar('SELECT COUNT(*) AS n FROM insurance_policies WHERE employee_id IS NOT NULL'),
     scalar("SELECT COUNT(*) AS n FROM review_queue WHERE status = 'open'"),
     scalar("SELECT COUNT(*) AS n FROM review_queue WHERE status = 'resolved'"),
