@@ -53,6 +53,21 @@
     --status-missing-soft: 220 14% 95%;
     --status-info: 220 88% 52%;
     --status-info-soft: 220 90% 96%;
+
+    /* A5.0 — interaction surface + motion tokens.
+       `--surface-elevated` is the bg used by InteractiveCard hover.
+       `--motion-*` and `--ease-*` are consumed by buttons, cards, rail,
+       skeleton shimmer. Framer Motion runs the three animated indicators
+       (sidebar/tabs/panel) directly; CSS handles everything else. */
+    --surface-elevated: 0 0% 99.5%;
+    --motion-fast: 120ms;
+    --motion-base: 200ms;
+    --motion-slow: 280ms;
+    --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+    --rail-w: 56px;
+    --rail-w-expanded: 240px;
+    --shadow-press: 0 0 0 1px rgba(15, 23, 42, 0.04);
+    --shadow-hover: 0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.06);
   }
 
   .dark {
@@ -100,7 +115,37 @@
     --status-missing-soft: 220 14% 16%;
     --status-info: 220 85% 65%;
     --status-info-soft: 220 50% 16%;
+
+    --surface-elevated: 222 40% 11%;
+    --shadow-press: 0 0 0 1px rgba(0, 0, 0, 0.4);
+    --shadow-hover: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.35);
   }
+}
+
+/* prefers-reduced-motion: zero out the motion budget. Framer Motion respects
+   the OS pref independently; this neutralises CSS transitions so the
+   manually-tuned press / hover / skeleton effects also calm down. */
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  .dark {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+}
+
+/* Skeleton shimmer used by LoadingSkeleton. Single keyframe set; per-row
+   `animation-delay` stagger lives in the component. */
+@keyframes ui-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
 }
 
 @layer base {

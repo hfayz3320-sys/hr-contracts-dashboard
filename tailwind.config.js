@@ -64,6 +64,19 @@ export default {
           info: 'hsl(var(--status-info))',
           'info-soft': 'hsl(var(--status-info-soft))',
         },
+        'surface-elevated': 'hsl(var(--surface-elevated))',
+      },
+      transitionDuration: {
+        'fast': 'var(--motion-fast)',
+        'base': 'var(--motion-base)',
+        'slow': 'var(--motion-slow)',
+      },
+      transitionTimingFunction: {
+        'out-quart': 'var(--ease-out-quart)',
+      },
+      boxShadow: {
+        'press': 'var(--shadow-press)',
+        'hover': 'var(--shadow-hover)',
       },
       borderRadius: {
         lg: 'var(--radius)',

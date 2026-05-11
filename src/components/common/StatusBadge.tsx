@@ -14,10 +14,17 @@ export function StatusBadge({
   status,
   label,
   className,
+  pulse = false,
 }: {
   status: GenericStatus;
   label?: string;
   className?: string;
+  /**
+   * When true, the dot breathes with a subtle 1.5s pulse — used for live
+   * "expiring soon" rows so the eye notices the row without the whole UI
+   * becoming noisy. Honors prefers-reduced-motion via globals.css.
+   */
+  pulse?: boolean;
 }) {
   return (
     <span
@@ -35,7 +42,9 @@ export function StatusBadge({
           status === 'expired' && 'bg-status-expired',
           status === 'missing' && 'bg-status-missing',
           status === 'info' && 'bg-status-info',
+          pulse && 'animate-pulse',
         )}
+        aria-hidden="true"
       />
       {label ?? statusLabels[status]}
     </span>
