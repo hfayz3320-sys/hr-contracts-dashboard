@@ -1,0 +1,60 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# build output
+dist
+dist-ssr
+*.local
+*.tsbuildinfo
+
+# private/source data — never deploy
+Data/
+public/data/
+dist/data/
+*.xlsx
+*.xls
+*.pdf
+*.csv
+*.tsv
+*.zip
+
+# Phase 2C admin-import runner temp + backup output. Both directories
+# contain INTERMEDIATE SQL that references real source filenames and
+# identity numbers from the production data — they must NEVER be tracked.
+.import-tmp/
+backups/
+
+# env / secrets
+.env
+.env.local
+.env.*
+!.env.example
+# `.env.production` is the SAME-ORIGIN-proxy config (VITE_API_BASE_URL="").
+# It carries no secrets and MUST be committed so that future production
+# builds on a fresh checkout never silently inherit a developer's
+# localhost-pointing .env.local. See .env.production for the full story.
+!.env.production
+worker/.dev.vars
+worker/.dev.vars.local
+
+# editor / OS
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea
+.DS_Store
+Thumbs.db
+
+# cloudflare/build caches (will be reused later phases)
+.wrangler/
+.wrangler/state/
+.vite/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log

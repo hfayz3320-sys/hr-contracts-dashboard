@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Brand — deep navy from MID Arabia logo */
+    --primary: 232 65% 22%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 17% 91%;
+    --input: 220 17% 91%;
+    --ring: 232 65% 35%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar — premium dark surface (kept dark in light mode for Linear/Vercel feel) */
+    --sidebar: 232 38% 11%;
+    --sidebar-foreground: 210 30% 88%;
+    --sidebar-accent: 232 32% 18%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 232 25% 18%;
+
+    /* Status namespace — subtly more saturated foregrounds for premium contrast */
+    --status-active: 142 66% 34%;
+    --status-active-soft: 142 50% 95%;
+    --status-expiring: 32 92% 46%;
+    --status-expiring-soft: 36 92% 95%;
+    --status-expired: 0 75% 48%;
+    --status-expired-soft: 0 78% 96%;
+    --status-missing: 220 13% 46%;
+    --status-missing-soft: 220 14% 95%;
+    --status-info: 220 88% 52%;
+    --status-info-soft: 220 90% 96%;
+  }
+
+  .dark {
+    --background: 222 47% 6%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 40% 9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 40% 9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 232 70% 70%;
+    --primary-foreground: 232 60% 12%;
+
+    --secondary: 222 30% 16%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 222 30% 16%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 222 30% 16%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 222 30% 16%;
+    --input: 222 30% 16%;
+    --ring: 232 70% 70%;
+
+    --sidebar: 222 47% 4%;
+    --sidebar-foreground: 210 30% 88%;
+    --sidebar-accent: 222 35% 12%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 222 35% 10%;
+
+    --status-active: 142 55% 50%;
+    --status-active-soft: 142 30% 16%;
+    --status-expiring: 32 90% 60%;
+    --status-expiring-soft: 32 50% 16%;
+    --status-expired: 0 72% 60%;
+    --status-expired-soft: 0 50% 16%;
+    --status-missing: 220 14% 60%;
+    --status-missing-soft: 220 14% 16%;
+    --status-info: 220 85% 65%;
+    --status-info-soft: 220 50% 16%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html, body, #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'rlig' 1, 'calt' 1, 'ss01' 1;
+  }
+  /* Tabular numerals for IDs/dates in tables */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

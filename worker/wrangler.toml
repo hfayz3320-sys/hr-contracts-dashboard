@@ -1,0 +1,68 @@
+name = "hr-contracts-api-v2"
+main = "src/index.ts"
+compatibility_date = "2024-11-15"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 binding — local dev uses miniflare's emulated D1 (no Cloudflare account needed).
+# Production database UUID is set below from `wrangler d1 create hr_contracts_db_v2`
+# (created 2026-05-10 in region EEUR). The same binding is used in dev and prod;
+# wrangler points local dev at the miniflare emulator regardless of database_id.
+[[d1_databases]]
+binding = "DB"
+database_name = "hr_contracts_db_v2"
+database_id = "1ca1c5fc-ce43-4444-873c-bc7a7c32bbb8"
+migrations_dir = "migrations"
+
+# R2 binding — private bucket for raw uploaded source files.
+# In local dev, miniflare provides an in-memory R2 emulator under
+# `.wrangler/state/v3/r2/`. The bucket name `hr-contracts-private-v2` matches
+# the Phase 2A Cloudflare resource plan; production deploy must
+# `wrangler r2 bucket create hr-contracts-private-v2` before binding.
+[[r2_buckets]]
+binding = "RAW_FILES"
+bucket_name = "hr-contracts-private-v2"
+
+[vars]
+# Worker-side environment knobs. Secrets go in `.dev.vars` (gitignored).
+# ALLOW_ORIGIN is a comma-separated allow-list (Vite dev = 5173, preview = 4173).
+ENVIRONMENT = "development"
+ALLOW_ORIGIN = "http://localhost:5173,http://localhost:4173"
+
+# Admin allow-list. In production, set ADMIN_EMAILS to the real list and
+# REMOVE DEV_ADMIN_EMAIL from production [vars]. The Worker hard-rejects
+# X-Dev-Admin-Email when ENVIRONMENT != "development".
+ADMIN_EMAILS = "admin@mid.local"
+DEV_ADMIN_EMAIL = "admin@mid.local"
+
+# Cloudflare Access — production must set this to your Access team domain so
+# the JWT verifier can fetch JWKS at:
+#   https://<TEAM>.cloudflareaccess.com/cdn-cgi/access/certs
+# Leave empty in development.
+CF_ACCESS_TEAM = ""
+CF_ACCESS_AUD  = ""
+
+# ---- Production environment ------------------------------------------------
+# Activated 2026-05-10. CF_ACCESS_TEAM/AUD provided by operator; the JWT
+# verifier fetches JWKS from https://midarabia.cloudflareaccess.com/cdn-cgi/access/certs.
+#
+# Wrangler does NOT inherit `[[d1_databases]]` and `[[r2_buckets]]` from the
+# top-level into named environments — they must be redeclared here, otherwise
+# the deployed worker has no DB / R2 binding and every HR endpoint 500s.
+[env.production.vars]
+ENVIRONMENT = "production"
+ALLOW_ORIGIN = "https://mid-contracts-dashboard.pages.dev"
+ADMIN_EMAILS = "hfayz3320@gmail.com,hamza.f@midcontracting.com"
+CF_ACCESS_TEAM = "midarabia"
+CF_ACCESS_AUD  = "23d1f347d5e175ddad8f6d3e5e33b51555ba4708f06fd8abde4b475cb24a353e"
+# DEV_ADMIN_EMAIL is intentionally absent. The Worker hard-rejects any
+# X-Dev-Admin-Email header when ENVIRONMENT != "development".
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "hr_contracts_db_v2"
+database_id = "1ca1c5fc-ce43-4444-873c-bc7a7c32bbb8"
+migrations_dir = "migrations"
+
+[[env.production.r2_buckets]]
+binding = "RAW_FILES"
+bucket_name = "hr-contracts-private-v2"

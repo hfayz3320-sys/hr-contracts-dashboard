@@ -1,0 +1,9 @@
+# Local-only secrets. Copy to `.dev.vars` (gitignored) for `wrangler dev`.
+# Phase 2B: admin allow-list. Override the wrangler.toml [vars] defaults
+# locally if you want to test as a different user.
+#
+# ADMIN_EMAILS overrides who can mutate via the API.
+# DEV_ADMIN_EMAIL is the fallback actor when no Cloudflare Access header
+# and no X-Dev-Admin-Email request header is present.
+ADMIN_EMAILS=admin@mid.local
+DEV_ADMIN_EMAIL=admin@mid.local

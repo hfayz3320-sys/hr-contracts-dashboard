@@ -1,0 +1,28 @@
+# Local test ONLY — simulates production behavior of the auth middleware.
+# Used by the Phase 2B safety smoke test to verify:
+#   - X-Dev-Admin-Email is rejected (400)
+#   - Missing JWT is rejected (401)
+#   - When CF_ACCESS_TEAM/AUD are unset, all admin endpoints 503
+# This file is local-only and not deployed.
+name = "hr-contracts-api-v2"
+main = "src/index.ts"
+compatibility_date = "2024-11-15"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "hr_contracts_db_v2"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "RAW_FILES"
+bucket_name = "hr-contracts-private-v2"
+
+[vars]
+ENVIRONMENT = "production"
+ALLOW_ORIGIN = "http://localhost:5173,http://localhost:4173"
+ADMIN_EMAILS = "admin@mid.local"
+# DEV_ADMIN_EMAIL intentionally omitted to simulate a real prod env
+CF_ACCESS_TEAM = ""
+CF_ACCESS_AUD = ""
