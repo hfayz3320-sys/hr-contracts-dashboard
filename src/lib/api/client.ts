@@ -22,6 +22,7 @@ import {
   auditEventsListResponse,
   contractsListResponse,
   employeeDetailResponse,
+  employee360Response,
   employeesListResponse,
   healthResponseSchema,
   importJobsListResponse,
@@ -191,6 +192,15 @@ export const api = {
     request(appUserSchema, API_PATHS.userEnable(id), { method: 'PATCH', admin: true }),
   employees: () => request(employeesListResponse, API_PATHS.employees),
   employee: (id: string) => request(employeeDetailResponse, API_PATHS.employee(id)),
+  /**
+   * Phase 4A (A5.1) — Employee 360 aggregate.
+   *
+   * Returns the same employee/contracts/insurance/audit payload as `employee()`
+   * plus `documents`, `transactions`, and (admin/hr) `dataQuality`. The
+   * underlying endpoint is identical (`GET /api/employees/:id`); the only
+   * difference is the response schema we validate against.
+   */
+  employee360: (id: string) => request(employee360Response, API_PATHS.employee(id)),
   /**
    * @param opts.includeEmployee — when true, each contract row carries an
    *   `employeeSummary` (id, name, redacted identity, employee number,

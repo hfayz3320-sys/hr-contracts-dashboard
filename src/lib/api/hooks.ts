@@ -20,6 +20,7 @@ export const queryKeys = {
   health:        ['health'] as const,
   employees:     ['employees'] as const,
   employee:      (id: string) => ['employee', id] as const,
+  employee360:   (id: string) => ['employee', '360', id] as const,
   contracts:     (includeEmployee?: boolean) =>
     includeEmployee ? (['contracts', { includeEmployee: true }] as const) : (['contracts'] as const),
   insurance:     (includeEmployee?: boolean) =>
@@ -44,6 +45,18 @@ export function useEmployee(id: string | null) {
   return useQuery({
     queryKey: id ? queryKeys.employee(id) : ['employee', 'none'],
     queryFn: () => (id ? api.employee(id) : Promise.reject(new Error('no id'))),
+    enabled: !!id,
+  });
+}
+
+/**
+ * A5.1 — Employee 360 aggregate hook. Same endpoint as `useEmployee` but
+ * the response shape includes documents / transactions / dataQuality.
+ */
+export function useEmployee360(id: string | null) {
+  return useQuery({
+    queryKey: id ? queryKeys.employee360(id) : ['employee', '360', 'none'],
+    queryFn: () => (id ? api.employee360(id) : Promise.reject(new Error('no id'))),
     enabled: !!id,
   });
 }
