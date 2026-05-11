@@ -45,6 +45,14 @@ export type EmployeeSummary = {
 
 export type LinkStatus = 'linked' | 'unmatched';
 
+/** Phase 3D — read-time data-quality flag, see worker/src/lib/contract-quality.ts. */
+export type ContractDataQualityIssue =
+  | 'duration_negative'
+  | 'duration_over_3_years'
+  | 'duration_under_30_days'
+  | 'start_date_missing'
+  | 'end_date_missing';
+
 export type ContractStatus = 'active' | 'expiring' | 'expired';
 
 export type Contract = {
@@ -65,6 +73,8 @@ export type Contract = {
   // Populated when the endpoint is hit with `?includeEmployee=1`.
   employeeSummary?: EmployeeSummary | null;
   linkStatus?: LinkStatus;
+  // Phase 3D — read-time data-quality flag.
+  dataQualityIssue?: ContractDataQualityIssue;
 };
 
 export type InsuranceStatus = 'active' | 'expired' | 'missing';

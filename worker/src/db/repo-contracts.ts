@@ -1,6 +1,7 @@
 import type { Env } from '../env';
 import type { Contract, ContractStatus } from '@shared/domain';
 import { buildEmployeeSummaryMap } from './employee-summary';
+import { computeContractDataQualityIssue } from '../lib/contract-quality';
 
 type ContractRow = {
   id: string;
@@ -19,7 +20,24 @@ type ContractRow = {
   created_at: string;
 };
 
+/**
+ * Map a D1 row to the API-facing Contract shape.
+ *
+ * Phase 3D: every emitted row carries an optional `dataQualityIssue`
+ * computed from start/end dates. Surfaces the parser mis-extractions
+ * (143 out of 328 production rows: 53 over-3-years + 90 negative-
+ * duration) to the FE so an admin sees a "Review required" badge
+ * instead of a misleading green "Active" pill.
+ *
+ * The stored `contracts.status` column is left untouched — it still
+ * reflects what the import pipeline computed at commit time and is
+ * useful as an audit baseline.
+ */
 function rowToContract(r: ContractRow): Contract {
+  const dataQualityIssue = computeContractDataQualityIssue({
+    startDate: r.start_date,
+    endDate: r.end_date,
+  });
   return {
     id: r.id,
     employeeId: r.employee_id,
@@ -35,6 +53,7 @@ function rowToContract(r: ContractRow): Contract {
     ...(r.extraction_confidence != null ? { extractionConfidence: r.extraction_confidence } : {}),
     ...(r.notes != null ? { notes: r.notes } : {}),
     createdAt: r.created_at,
+    ...(dataQualityIssue != null ? { dataQualityIssue } : {}),
   };
 }
 

@@ -1,4 +1,5 @@
 import type { ColumnDef } from '@tanstack/react-table';
+import { AlertTriangle } from 'lucide-react';
 import type { Contract, Employee } from '@/types/domain';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { Badge } from '@/components/ui/badge';
@@ -103,7 +104,26 @@ export function buildContractColumns(
     {
       accessorKey: 'status',
       header: 'Status',
-      cell: ({ row }) => <StatusBadge status={row.original.status} />,
+      // Phase 3D: if the row has a data-quality issue, suppress the
+      // (date-derived) status badge and show a "Review" badge instead.
+      // We don't want green "Active" pills on contracts whose dates are
+      // demonstrably wrong — the misleading status is exactly what made
+      // 143 broken parser outputs look fine in production.
+      cell: ({ row }) => {
+        const r = row.original;
+        if (r.dataQualityIssue) {
+          return (
+            <span
+              className="inline-flex items-center gap-1 rounded-md border border-status-expiring bg-status-expiring-soft px-1.5 py-0.5 text-[11px] font-medium text-status-expiring"
+              title={r.dataQualityIssue.replace(/_/g, ' ')}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              Review
+            </span>
+          );
+        }
+        return <StatusBadge status={r.status} />;
+      },
     },
   ];
 }

@@ -59,6 +59,39 @@ export type LinkStatus = 'linked' | 'unmatched';
 
 export type ContractStatus = 'active' | 'expiring' | 'expired';
 
+/**
+ * Read-time data-quality flag for a single Contract row (Phase 3D).
+ *
+ * The original Phase 2C PDF parsers fall back to a "first two dates in
+ * document order" positional pairing when labelled extraction fails. In
+ * MoHRSD standardised contracts the document also contains the
+ * employee's ID expiry, work-permit expiry, and other unrelated dates
+ * — so the positional fallback often pairs the wrong two values,
+ * producing impossible windows (negative duration, >5-year duration,
+ * etc.). The status enum can't express "this row looks broken,
+ * regardless of where today falls in the date window"; that's what
+ * `dataQualityIssue` is for. The FE shows a "Review required" badge
+ * whenever it is set, taking visual precedence over the (date-derived)
+ * status badge.
+ *
+ *   duration_negative      — end_date strictly before start_date
+ *   duration_over_3_years  — end_date − start_date > 3 years; MID's
+ *                             standard fixed-term is 1 year
+ *   duration_under_30_days — end_date − start_date < 30 days; almost
+ *                             always a parser mis-pair, e.g. ID issue
+ *                             date vs ID expiry date
+ *   start_date_missing     — start_date is empty (NOT NULL constraint
+ *                             prevents this in D1, but the type allows
+ *                             belt-and-braces)
+ *   end_date_missing       — end_date is empty
+ */
+export type ContractDataQualityIssue =
+  | 'duration_negative'
+  | 'duration_over_3_years'
+  | 'duration_under_30_days'
+  | 'start_date_missing'
+  | 'end_date_missing';
+
 export type Contract = {
   id: string;
   employeeId: string;
@@ -80,6 +113,8 @@ export type Contract = {
   // `employeeSummary` instead of relying on a parallel employees fetch.
   employeeSummary?: EmployeeSummary | null;
   linkStatus?: LinkStatus;
+  // Phase 3D — computed at read time. See ContractDataQualityIssue above.
+  dataQualityIssue?: ContractDataQualityIssue;
 };
 
 export type InsuranceStatus = 'active' | 'expired' | 'missing';

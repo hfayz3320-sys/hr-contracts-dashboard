@@ -64,6 +64,16 @@ export const employeeSummarySchema = z.object({
 });
 export const linkStatusSchema = z.enum(['linked', 'unmatched']);
 
+// Phase 3D — read-time data-quality flag for contracts. See
+// `worker/src/lib/contract-quality.ts` for the canonical predicate.
+export const contractDataQualityIssueSchema = z.enum([
+  'duration_negative',
+  'duration_over_3_years',
+  'duration_under_30_days',
+  'start_date_missing',
+  'end_date_missing',
+]);
+
 export const contractSchema = z.object({
   id: z.string(),
   employeeId: z.string(),
@@ -86,6 +96,7 @@ export const contractSchema = z.object({
   createdAt: z.string(),
   employeeSummary: employeeSummarySchema.nullable().optional(),
   linkStatus: linkStatusSchema.optional(),
+  dataQualityIssue: contractDataQualityIssueSchema.optional(),
 });
 
 export const insuranceSchema = z.object({
