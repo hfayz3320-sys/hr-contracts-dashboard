@@ -174,3 +174,129 @@ export const reviewReasonLabels: Record<ReviewReason, string> = {
   low_confidence_extraction: 'Low-confidence PDF extraction',
   missing_contract_fields: 'Contract missing dates / type / file',
 };
+
+// =============================================================================
+// Phase 4A — Employee 360 (FE mirror of shared/domain.ts).
+// =============================================================================
+
+export type EmployeeDocumentType =
+  | 'iqama'
+  | 'passport'
+  | 'visa'
+  | 'work_permit'
+  | 'contract_pdf'
+  | 'insurance_card'
+  | 'medical_certificate'
+  | 'driving_license'
+  | 'other';
+
+export type EmployeeDocumentStatus =
+  | 'active'
+  | 'expired'
+  | 'archived'
+  | 'review_required';
+
+export type EmployeeDocument = {
+  id: string;
+  employeeId: string;
+  type: EmployeeDocumentType;
+  docNumber?: string;
+  issuedAt?: string;
+  expiresAt?: string;
+  /** Stored workflow state. May drift past expiry. Use `computedStatus` for UI. */
+  status: EmployeeDocumentStatus;
+  /** Read-time computed status — ALWAYS the source of truth for UI/KPIs. */
+  computedStatus: EmployeeDocumentStatus;
+  isCurrent: boolean;
+  verifiedAt?: string;
+  verifiedBy?: string;
+  reviewRequired: boolean;
+  reviewReason?: string;
+  extractionConfidence?: number;
+  sourceFileId?: string;
+  metadata?: Record<string, unknown>;
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+export type EmployeeTransactionType =
+  | 'flight_ticket'
+  | 'iqama_renewal'
+  | 'visa'
+  | 'exit_re_entry'
+  | 'vacation'
+  | 'salary_adjustment'
+  | 'allowance_change'
+  | 'warning'
+  | 'document_request'
+  | 'contract_renewal_request'
+  | 'insurance_update'
+  | 'training'
+  | 'transfer'
+  | 'promotion'
+  | 'termination'
+  | 'medical_claim'
+  | 'other';
+
+export type EmployeeTransactionStatus =
+  | 'requested'
+  | 'approved'
+  | 'rejected'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled';
+
+export type EmployeeTransaction = {
+  id: string;
+  employeeId: string;
+  type: EmployeeTransactionType;
+  status: EmployeeTransactionStatus;
+  title: string;
+  effectiveDate?: string;
+  endDate?: string;
+  amount?: number;
+  currency?: string;
+  refNumber?: string;
+  payload?: Record<string, unknown>;
+  payloadSchemaVersion: number;
+  metadata?: Record<string, unknown>;
+  sourceFileId?: string;
+  reviewRequired: boolean;
+  reviewReason?: string;
+  idempotencyKey?: string;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+export type EmployeeDataQualityIssue =
+  | 'missing_date_of_birth'
+  | 'missing_nationality'
+  | 'missing_hire_date'
+  | 'no_current_employee_number'
+  | 'iqama_expiring_soon_30d'
+  | 'iqama_expired'
+  | 'passport_expiring_soon_180d'
+  | 'passport_expired'
+  | 'no_active_contract'
+  | 'no_active_insurance'
+  | 'contract_with_quality_flag';
+
+export type EmployeeDataQualityReport = {
+  issues: EmployeeDataQualityIssue[];
+  reviewItemIds: string[];
+};
+
+export type Employee360 = {
+  employee: Employee;
+  contracts: Contract[];
+  insurance: Insurance[];
+  documents: EmployeeDocument[];
+  transactions: EmployeeTransaction[];
+  audit: AuditEvent[];
+  dataQuality?: EmployeeDataQualityReport;
+};

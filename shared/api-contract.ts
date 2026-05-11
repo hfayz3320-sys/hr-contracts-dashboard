@@ -472,6 +472,396 @@ export const debugCountsResponse = z.object({
 
 export type DebugCountsResponse = z.infer<typeof debugCountsResponse>;
 
+// =============================================================================
+// Phase 4A — Employee 360 contracts.
+//
+// Two new resources hanging off /api/employees/:id:
+//
+//   GET    /api/employees/:id/documents
+//   POST   /api/employees/:id/documents
+//   PATCH  /api/employees/:id/documents/:docId
+//   DELETE /api/employees/:id/documents/:docId
+//
+//   GET    /api/employees/:id/transactions
+//   POST   /api/employees/:id/transactions
+//   PATCH  /api/employees/:id/transactions/:txnId
+//   DELETE /api/employees/:id/transactions/:txnId
+//
+// And the existing GET /api/employees/:id is extended ADDITIVELY to
+// include `documents`, `transactions`, and `dataQuality` fields. Older
+// callers still receive `employee/contracts/insurance/audit` unchanged.
+// =============================================================================
+
+export const employeeDocumentTypeSchema = z.enum([
+  'iqama', 'passport', 'visa', 'work_permit',
+  'contract_pdf', 'insurance_card',
+  'medical_certificate', 'driving_license', 'other',
+]);
+export const employeeDocumentStatusSchema = z.enum([
+  'active', 'expired', 'archived', 'review_required',
+]);
+
+/**
+ * EmployeeDocument response shape.
+ *
+ * Phase 4A patch: `status` is the stored workflow state (set manually by
+ * HR or by import). `computedStatus` is the read-time value derived in
+ * the worker by `computeEmployeeDocumentStatus()`. Dashboards / UI /
+ * bulk operations MUST read `computedStatus`. The stored `status` is
+ * preserved for audit + manual transition workflows (e.g. archive
+ * button writes status='archived'; the next read recomputes and likely
+ * agrees).
+ */
+export const employeeDocumentSchema = z.object({
+  id: z.string(),
+  employeeId: z.string(),
+  type: employeeDocumentTypeSchema,
+  docNumber: z.string().optional(),
+  issuedAt: z.string().optional(),
+  expiresAt: z.string().optional(),
+  status: employeeDocumentStatusSchema,
+  computedStatus: employeeDocumentStatusSchema,
+  isCurrent: z.boolean(),
+  verifiedAt: z.string().optional(),
+  verifiedBy: z.string().optional(),
+  reviewRequired: z.boolean(),
+  reviewReason: z.string().optional(),
+  extractionConfidence: z.number().min(-0.001).max(1.001).optional(),
+  sourceFileId: z.string().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  notes: z.string().optional(),
+  createdAt: z.string(),
+  createdBy: z.string(),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+});
+
+export const employeeDocumentsListResponse = listResponseSchema(employeeDocumentSchema);
+
+// PATCH input — every field optional. type/employeeId cannot be changed
+// after creation (would invalidate the partial unique index and break
+// audit lineage). doc_number can be added/updated freely.
+export const employeeDocumentCreateRequest = z.object({
+  type: employeeDocumentTypeSchema,
+  docNumber: z.string().nullable().optional(),
+  issuedAt: z.string().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  status: employeeDocumentStatusSchema.optional(),
+  isCurrent: z.boolean().optional(),
+  reviewRequired: z.boolean().optional(),
+  reviewReason: z.string().nullable().optional(),
+  sourceFileId: z.string().nullable().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  notes: z.string().nullable().optional(),
+});
+export const employeeDocumentPatchRequest = z.object({
+  docNumber: z.string().nullable().optional(),
+  issuedAt: z.string().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  status: employeeDocumentStatusSchema.optional(),
+  isCurrent: z.boolean().optional(),
+  verifiedAt: z.string().nullable().optional(),
+  verifiedBy: z.string().nullable().optional(),
+  reviewRequired: z.boolean().optional(),
+  reviewReason: z.string().nullable().optional(),
+  sourceFileId: z.string().nullable().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  notes: z.string().nullable().optional(),
+});
+export const employeeDocumentResponse = z.object({
+  ok: z.literal(true),
+  document: employeeDocumentSchema,
+});
+
+// ---- Transactions ----------------------------------------------------------
+
+/**
+ * Canonical transaction-type enum, enforced at the API boundary even though
+ * the D1 column is free-form TEXT. Mirrors `EmployeeTransactionType`. The
+ * test suite asserts this list equals `EmployeeTransactionType` so a
+ * canonical-list typo fails CI.
+ */
+export const employeeTransactionTypeSchema = z.enum([
+  'flight_ticket',
+  'iqama_renewal',
+  'visa',
+  'exit_re_entry',
+  'vacation',
+  'salary_adjustment',
+  'allowance_change',
+  'warning',
+  'document_request',
+  'contract_renewal_request',
+  'insurance_update',
+  'training',
+  'transfer',
+  'promotion',
+  'termination',
+  'medical_claim',
+  'other',
+]);
+
+export const employeeTransactionStatusSchema = z.enum([
+  'requested', 'approved', 'rejected',
+  'in_progress', 'completed', 'cancelled',
+]);
+
+// ---- per-type payload schemas ----------------------------------------------
+// Each payload is a permissive object that captures the minimum required
+// fields. `passthrough` lets us roll forward to additional optional fields
+// without breaking historic rows. Strict `omit/extend` lives in tests.
+
+const flightTicketPayload = z
+  .object({
+    from: z.string().min(2),
+    to: z.string().min(2),
+    airline: z.string().optional(),
+    pnr: z.string().optional(),
+    classOfService: z.enum(['economy', 'business', 'first']).optional(),
+    isReturn: z.boolean().optional(),
+  })
+  .passthrough();
+
+const vacationPayload = z
+  .object({
+    days: z.number().int().positive(),
+    balanceBefore: z.number().int().nonnegative().optional(),
+    balanceAfter: z.number().int().nonnegative().optional(),
+    reason: z.string().optional(),
+  })
+  .passthrough();
+
+const salaryAdjustmentPayload = z
+  .object({
+    reason: z.string(),
+    oldBasic: z.number().nonnegative(),
+    newBasic: z.number().nonnegative(),
+    effectiveContractId: z.string().optional(),
+  })
+  .passthrough();
+
+const warningPayload = z
+  .object({
+    level: z.enum(['verbal', 'written_1st', 'written_2nd', 'final']),
+    reason: z.string(),
+  })
+  .passthrough();
+
+const documentRequestPayload = z
+  .object({
+    requestedDocType: employeeDocumentTypeSchema,
+    requestedFor: z.string().optional(), // 'embassy', 'bank', etc.
+  })
+  .passthrough();
+
+const iqamaRenewalPayload = z
+  .object({
+    oldIqamaNumber: z.string().optional(),
+    newIqamaNumber: z.string().optional(),
+    fee: z.number().nonnegative().optional(),
+    newExpiresAt: z.string().optional(),
+  })
+  .passthrough();
+
+/**
+ * Open fallback for types whose payload contract hasn't been specified
+ * yet, or for `other`. `record(z.unknown())` accepts any object.
+ */
+const openPayload = z.record(z.unknown());
+
+/**
+ * Dispatch payload-validator by `type`. Unknown / unspecified types fall
+ * through to `openPayload`. CREATE requests with strict canonical types
+ * use this; PATCH only validates whatever fields the caller supplies.
+ */
+export function payloadSchemaForType(type: string): z.ZodTypeAny {
+  switch (type) {
+    case 'flight_ticket':       return flightTicketPayload;
+    case 'vacation':            return vacationPayload;
+    case 'salary_adjustment':   return salaryAdjustmentPayload;
+    case 'warning':             return warningPayload;
+    case 'document_request':    return documentRequestPayload;
+    case 'iqama_renewal':       return iqamaRenewalPayload;
+    default:                    return openPayload;
+  }
+}
+
+export const employeeTransactionSchema = z.object({
+  id: z.string(),
+  employeeId: z.string(),
+  type: employeeTransactionTypeSchema,
+  status: employeeTransactionStatusSchema,
+  title: z.string(),
+  effectiveDate: z.string().optional(),
+  endDate: z.string().optional(),
+  amount: z.number().optional(),
+  currency: z.string().optional(),
+  refNumber: z.string().optional(),
+  payload: z.record(z.unknown()).optional(),
+  payloadSchemaVersion: z.number().int().positive(),
+  metadata: z.record(z.unknown()).optional(),
+  sourceFileId: z.string().optional(),
+  reviewRequired: z.boolean(),
+  reviewReason: z.string().optional(),
+  idempotencyKey: z.string().optional(),
+  createdAt: z.string(),
+  createdBy: z.string(),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+});
+
+export const employeeTransactionsListResponse = listResponseSchema(employeeTransactionSchema);
+
+/**
+ * employeeTransactionCreateRequest — idempotency contract
+ * --------------------------------------------------------
+ *
+ * `idempotencyKey` is OPTIONAL.
+ *
+ *   1. NULL / omitted          → every request creates a NEW row. D1's
+ *                                 `UNIQUE` constraint on the column treats
+ *                                 multiple NULLs as distinct, so this is
+ *                                 always allowed.
+ *
+ *   2. Same key + same body    → API returns the EXISTING row with
+ *                                 HTTP 200. The route handler MUST look
+ *                                 up the row by key, hash the canonical
+ *                                 subset of the request, and compare.
+ *                                 Producers that re-submit a transient
+ *                                 failure get exactly-once semantics.
+ *
+ *   3. Same key + different    → API returns HTTP 409 Conflict with the
+ *      body                       existing row in the response body so
+ *                                 the producer can decide (retry with a
+ *                                 new key vs. reconcile). The stored
+ *                                 row is NOT updated.
+ *
+ * "Same body" — the canonical subset:
+ *   type, status, title, effectiveDate, endDate, amount, currency,
+ *   refNumber, payload, payloadSchemaVersion, sourceFileId,
+ *   reviewRequired, reviewReason
+ *
+ * Fields excluded from the equality check:
+ *   metadata (free-form admin tags), idempotencyKey itself, createdBy,
+ *   updatedBy, createdAt, updatedAt.
+ *
+ * The hash function lives in `worker/src/lib/idempotency.ts` (NOT in
+ * A1; ships in A2). This zod schema is the source-of-truth for which
+ * fields are part of the comparison.
+ */
+export const employeeTransactionCreateRequest = z.object({
+  type: employeeTransactionTypeSchema,
+  status: employeeTransactionStatusSchema.optional(),
+  title: z.string().min(1),
+  effectiveDate: z.string().nullable().optional(),
+  endDate: z.string().nullable().optional(),
+  amount: z.number().nullable().optional(),
+  currency: z.string().nullable().optional(),
+  refNumber: z.string().nullable().optional(),
+  payload: z.record(z.unknown()).optional(),
+  payloadSchemaVersion: z.number().int().positive().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  sourceFileId: z.string().nullable().optional(),
+  reviewRequired: z.boolean().optional(),
+  reviewReason: z.string().nullable().optional(),
+  idempotencyKey: z.string().nullable().optional(),
+});
+
+/**
+ * Canonical subset of `employeeTransactionCreateRequest` that participates
+ * in the idempotency equality check. Exported separately so the worker
+ * route can hash exactly these fields and tests can assert on the same
+ * list. Drift between this schema and the equality predicate is what
+ * we want to make hard.
+ */
+export const employeeTransactionIdempotencyEqualityKeys = [
+  'type',
+  'status',
+  'title',
+  'effectiveDate',
+  'endDate',
+  'amount',
+  'currency',
+  'refNumber',
+  'payload',
+  'payloadSchemaVersion',
+  'sourceFileId',
+  'reviewRequired',
+  'reviewReason',
+] as const;
+export type EmployeeTransactionIdempotencyEqualityKey =
+  typeof employeeTransactionIdempotencyEqualityKeys[number];
+
+export const employeeTransactionPatchRequest = z.object({
+  status: employeeTransactionStatusSchema.optional(),
+  title: z.string().min(1).optional(),
+  effectiveDate: z.string().nullable().optional(),
+  endDate: z.string().nullable().optional(),
+  amount: z.number().nullable().optional(),
+  currency: z.string().nullable().optional(),
+  refNumber: z.string().nullable().optional(),
+  payload: z.record(z.unknown()).optional(),
+  payloadSchemaVersion: z.number().int().positive().optional(),
+  metadata: z.record(z.unknown()).optional(),
+  sourceFileId: z.string().nullable().optional(),
+  reviewRequired: z.boolean().optional(),
+  reviewReason: z.string().nullable().optional(),
+});
+
+export const employeeTransactionResponse = z.object({
+  ok: z.literal(true),
+  transaction: employeeTransactionSchema,
+});
+
+// ---- Data quality ----------------------------------------------------------
+
+export const employeeDataQualityIssueSchema = z.enum([
+  'missing_date_of_birth',
+  'missing_nationality',
+  'missing_hire_date',
+  'no_current_employee_number',
+  'iqama_expiring_soon_30d',
+  'iqama_expired',
+  'passport_expiring_soon_180d',
+  'passport_expired',
+  'no_active_contract',
+  'no_active_insurance',
+  'contract_with_quality_flag',
+]);
+
+export const employeeDataQualityReportSchema = z.object({
+  issues: z.array(employeeDataQualityIssueSchema),
+  reviewItemIds: z.array(z.string()),
+});
+
+// ---- Employee 360 extension ------------------------------------------------
+
+/**
+ * The existing `employeeDetailResponse` (employee/contracts/insurance/audit)
+ * is preserved verbatim for backward compatibility. Phase 4A adds optional
+ * fields on the SAME response when the caller is signed in.
+ */
+export const employee360Response = z.object({
+  employee: employeeSchema,
+  contracts: z.array(contractSchema),
+  insurance: z.array(insuranceSchema),
+  documents: z.array(employeeDocumentSchema),
+  transactions: z.array(employeeTransactionSchema),
+  audit: z.array(auditEventSchema),
+  dataQuality: employeeDataQualityReportSchema.optional(),
+});
+
+export type EmployeeDocument          = z.infer<typeof employeeDocumentSchema>;
+export type EmployeeDocumentsListResponse = z.infer<typeof employeeDocumentsListResponse>;
+export type EmployeeDocumentCreateRequest = z.infer<typeof employeeDocumentCreateRequest>;
+export type EmployeeDocumentPatchRequest  = z.infer<typeof employeeDocumentPatchRequest>;
+export type EmployeeTransaction       = z.infer<typeof employeeTransactionSchema>;
+export type EmployeeTransactionsListResponse = z.infer<typeof employeeTransactionsListResponse>;
+export type EmployeeTransactionCreateRequest = z.infer<typeof employeeTransactionCreateRequest>;
+export type EmployeeTransactionPatchRequest  = z.infer<typeof employeeTransactionPatchRequest>;
+export type EmployeeDataQualityReport = z.infer<typeof employeeDataQualityReportSchema>;
+export type Employee360Response       = z.infer<typeof employee360Response>;
+
 // ---------- inferred types -------------------------------------------------
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
@@ -551,4 +941,10 @@ export const API_PATHS = {
   reviewReject: (id: string) => `/api/review-queue/${encodeURIComponent(id)}/reject`,
   // Phase 3A — admin debug counts.
   debugCounts: '/api/debug/counts',
+  // Phase 4A — Employee 360 (NOT yet implemented; paths reserved so the FE
+  // client and tests can compile against canonical strings).
+  employeeDocuments:    (id: string)                  => `/api/employees/${encodeURIComponent(id)}/documents`,
+  employeeDocument:     (id: string, docId: string)   => `/api/employees/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`,
+  employeeTransactions: (id: string)                  => `/api/employees/${encodeURIComponent(id)}/transactions`,
+  employeeTransaction:  (id: string, txnId: string)   => `/api/employees/${encodeURIComponent(id)}/transactions/${encodeURIComponent(txnId)}`,
 } as const;

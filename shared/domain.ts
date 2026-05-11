@@ -200,6 +200,199 @@ export type SourceFile = {
   importJobId?: string;
 };
 
+// =============================================================================
+// Employee 360 — Phase 4A.
+//
+// Two new entities anchored on `employees(id)`:
+//
+//   EmployeeDocument    — Iqama / passport / visa / etc. with lifecycle
+//                          (issued/expires/verified/archived/review).
+//   EmployeeTransaction — generic HR ledger row (flight ticket, vacation,
+//                          salary adjustment, warning, …) with per-type
+//                          structured payload and idempotency-key support.
+//
+// Plus a computed EmployeeDataQualityReport that aggregates issues across
+// all relations and exposes them to the FE for the new "Data Quality" tab.
+//
+// These types are STRUCTURAL only — no API client or repo here. Repos +
+// routes ship in subsequent phases. The shapes are stable enough to commit
+// because they map 1:1 to the 0005 schema.
+// =============================================================================
+
+/**
+ * Stable enum of document types. Adding a new type requires a D1 migration
+ * to extend the CHECK constraint, by intent — document categories are rare
+ * and structural.
+ */
+export type EmployeeDocumentType =
+  | 'iqama'
+  | 'passport'
+  | 'visa'
+  | 'work_permit'
+  | 'contract_pdf'
+  | 'insurance_card'
+  | 'medical_certificate'
+  | 'driving_license'
+  | 'other';
+
+/** Lifecycle status — independent of `reviewRequired`. */
+export type EmployeeDocumentStatus =
+  | 'active'
+  | 'expired'
+  | 'archived'
+  | 'review_required';
+
+export type EmployeeDocument = {
+  id: string;
+  employeeId: string;
+  type: EmployeeDocumentType;
+  /** Identifier on the document; nullable until transcribed. NOT a match key. */
+  docNumber?: string;
+  /** ISO YYYY-MM-DD. */
+  issuedAt?: string;
+  /** ISO YYYY-MM-DD; drives expiry KPIs on the Dashboard. */
+  expiresAt?: string;
+  /**
+   * Stored workflow state. Set manually by HR (active/archived) or by the
+   * import pipeline at commit time. CAN DRIFT — once today crosses the
+   * row's `expires_at`, the stored value is no longer the truth. UI and
+   * dashboards MUST read `computedStatus` instead. This column is kept
+   * for audit + manual workflow transitions.
+   */
+  status: EmployeeDocumentStatus;
+  /**
+   * Read-time computed value: the actual status to display today. Derived
+   * from (status, isCurrent, reviewRequired, expiresAt, type-required
+   * fields) by `computeEmployeeDocumentStatus()` in the worker. ALWAYS
+   * use this field for UI badges, dashboard KPIs, and bulk operations.
+   * See worker/src/lib/employee-document-status.ts for the canonical
+   * logic.
+   */
+  computedStatus: EmployeeDocumentStatus;
+  /** Is this the employee's CURRENT document of its type. Historical = false. */
+  isCurrent: boolean;
+  /** ISO datetime when an HR-manager confirmed the original. */
+  verifiedAt?: string;
+  /** Actor email of the verifier. */
+  verifiedBy?: string;
+  reviewRequired: boolean;
+  reviewReason?: string;
+  /** 0..1 — when the row was created by a parser/OCR. */
+  extractionConfidence?: number;
+  /** Pointer into `source_files.hash` (same R2 keyspace as contracts). */
+  sourceFileId?: string;
+  /** Type-specific extras (issuingCountry, visaClass, …) — JSON. */
+  metadata?: Record<string, unknown>;
+  notes?: string;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+/**
+ * Generic HR transaction. Canonical TYPE list is enforced at the API
+ * boundary via zod (not in the D1 schema). Adding a new transaction type
+ * is a code change in this file + the zod payload union; no D1 migration.
+ */
+export type EmployeeTransactionType =
+  | 'flight_ticket'
+  | 'iqama_renewal'
+  | 'visa'
+  | 'exit_re_entry'
+  | 'vacation'
+  | 'salary_adjustment'
+  | 'allowance_change'
+  | 'warning'
+  | 'document_request'
+  | 'contract_renewal_request'
+  | 'insurance_update'
+  | 'training'
+  | 'transfer'
+  | 'promotion'
+  | 'termination'
+  | 'medical_claim'
+  | 'other';
+
+export type EmployeeTransactionStatus =
+  | 'requested'
+  | 'approved'
+  | 'rejected'
+  | 'in_progress'
+  | 'completed'
+  | 'cancelled';
+
+export type EmployeeTransaction = {
+  id: string;
+  employeeId: string;
+  type: EmployeeTransactionType;
+  status: EmployeeTransactionStatus;
+  /** Short label visible in lists. */
+  title: string;
+  effectiveDate?: string;
+  endDate?: string;
+  amount?: number;
+  currency?: string;
+  refNumber?: string;
+  /** Structured per-type body — schema in `shared/api-contract.ts`. */
+  payload?: Record<string, unknown>;
+  /** Bumped when the per-type payload schema changes incompatibly. */
+  payloadSchemaVersion: number;
+  /** Free-form admin extras that don't belong in `payload`. */
+  metadata?: Record<string, unknown>;
+  sourceFileId?: string;
+  reviewRequired: boolean;
+  reviewReason?: string;
+  /** Optional opaque key for safe re-submission. UNIQUE globally when set. */
+  idempotencyKey?: string;
+  createdAt: string;
+  createdBy: string;
+  updatedAt: string;
+  updatedBy: string;
+};
+
+/**
+ * Read-time, computed in the worker — not stored. Surfaces aggregate
+ * issues an HR admin should see on the Employee Profile "Data Quality"
+ * tab. Each issue is a stable string code; FE renders human-readable
+ * labels from a translation map.
+ */
+export type EmployeeDataQualityIssue =
+  | 'missing_date_of_birth'
+  | 'missing_nationality'
+  | 'missing_hire_date'
+  | 'no_current_employee_number'
+  | 'iqama_expiring_soon_30d'
+  | 'iqama_expired'
+  | 'passport_expiring_soon_180d'
+  | 'passport_expired'
+  | 'no_active_contract'
+  | 'no_active_insurance'
+  | 'contract_with_quality_flag';
+
+export type EmployeeDataQualityReport = {
+  issues: EmployeeDataQualityIssue[];
+  /** Open `review_queue` rows that target this employee. */
+  reviewItemIds: string[];
+};
+
+/**
+ * Full Employee 360 detail aggregate returned by GET /api/employees/:id
+ * once Phase 4A ships. ADDITIVE: existing consumers see the same
+ * `employee/contracts/insurance/audit` fields; new consumers can also
+ * use `documents/transactions/dataQuality`.
+ */
+export type Employee360 = {
+  employee: Employee;
+  contracts: Contract[];
+  insurance: Insurance[];
+  documents: EmployeeDocument[];
+  transactions: EmployeeTransaction[];
+  audit: AuditEvent[];
+  /** Computed; only present for admin / hr_manager callers. */
+  dataQuality?: EmployeeDataQualityReport;
+};
+
 export const reviewReasonLabels: Record<ReviewReason, string> = {
   missing_identity: 'Missing IdentityNumber',
   duplicate_identity: 'Duplicate / conflicting identity',
