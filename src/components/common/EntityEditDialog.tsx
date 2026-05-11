@@ -127,7 +127,19 @@ export function EntityEditDialog<TRecord>({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          {description && <DialogDescription>{description}</DialogDescription>}
+          {/* A5.0 caller-level a11y fix: always emit DialogDescription. All
+              current call sites (Employees, Contracts, Insurance) pass a
+              meaningful description. The sr-only branch is the safety net
+              for any future caller that forgets — preferable to a runtime
+              fallback at the primitive level (per the approved plan,
+              fallback is allowed only as safety net, not main solution). */}
+          {description ? (
+            <DialogDescription>{description}</DialogDescription>
+          ) : (
+            <DialogDescription className="sr-only">
+              Edit form. Update fields below; changes are saved to the database and audit log.
+            </DialogDescription>
+          )}
         </DialogHeader>
 
         <div className="grid grid-cols-2 gap-4 py-2 max-h-[60vh] overflow-y-auto">

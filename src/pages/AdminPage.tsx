@@ -8,10 +8,12 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { AuditTimeline } from '@/components/common/AuditTimeline';
 import { ExportButton } from '@/components/common/ExportButton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { EmptyState } from '@/components/ui-foundation/EmptyState';
 import {
   Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/dates';
 import { reviewReasonLabels } from '@/types/domain';
 import type { ImportJob } from '@/types/domain';
@@ -92,7 +94,10 @@ export function AdminPage() {
                   {importJobs.map((j) => (
                     <TableRow
                       key={j.id}
-                      className="cursor-pointer hover:bg-muted/40"
+                      className={cn(
+                        'cursor-pointer transition-colors duration-fast ease-out-quart',
+                        'hover:bg-muted/40 active:bg-muted/60',
+                      )}
                       onClick={() => setOpenJobId(j.id)}
                     >
                       <TableCell>
@@ -166,8 +171,13 @@ export function AdminPage() {
         <TabsContent value="errors">
           {errors.length === 0 ? (
             <Card>
-              <CardContent className="py-12 text-center text-sm text-muted-foreground">
-                No errors recorded.
+              <CardContent className="p-0">
+                <EmptyState
+                  icon={CheckCircle2}
+                  tone="info"
+                  title="No errors recorded"
+                  description="Every operation in the audit log completed without raising an error. New failures will appear here automatically."
+                />
               </CardContent>
             </Card>
           ) : (

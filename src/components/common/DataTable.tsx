@@ -95,7 +95,25 @@ export function DataTable<T>({
               <TableRow
                 key={row.id}
                 onClick={onRowClick ? () => onRowClick(row.original) : undefined}
-                className={onRowClick ? 'cursor-pointer' : ''}
+                // A5.0 — operational row affordance. Hover lift via bg only
+                // (no transform — would shift cell borders). Active state
+                // pulses a touch to acknowledge the click. Non-clickable
+                // tables get neither.
+                className={cn(
+                  onRowClick &&
+                    'cursor-pointer transition-colors duration-fast hover:bg-muted/40 active:bg-muted/60',
+                )}
+                tabIndex={onRowClick ? 0 : -1}
+                onKeyDown={
+                  onRowClick
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onRowClick(row.original);
+                        }
+                      }
+                    : undefined
+                }
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>

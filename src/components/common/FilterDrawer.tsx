@@ -54,7 +54,20 @@ export function FilterDrawer({
               Reset
             </Button>
           </div>
-          {description && <SheetDescription>{description}</SheetDescription>}
+          {/* A5.0 caller-level a11y fix: SheetDescription is ALWAYS emitted so
+              Radix's Dialog.Content never warns about a missing accessible
+              description. When the caller passes `description`, we render it
+              visibly; otherwise we emit an sr-only sentence describing the
+              panel. The three FilterDrawer call sites (Employees, Contracts,
+              Insurance) ALSO supply explicit description props for the
+              visible variant. */}
+          {description ? (
+            <SheetDescription>{description}</SheetDescription>
+          ) : (
+            <SheetDescription className="sr-only">
+              Filter panel. Adjust the criteria below, then press Apply to update the list.
+            </SheetDescription>
+          )}
         </SheetHeader>
 
         <ScrollArea className="flex-1 px-6 py-4">

@@ -15,7 +15,7 @@
  * Export downloads the currently filtered set as XLSX.
  */
 import { useMemo, useState } from 'react';
-import { CheckCircle2, ChevronRight, AlertCircle } from 'lucide-react';
+import { CheckCircle2, ChevronRight, AlertCircle, ListChecks, AlertTriangle, Archive, Inbox } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,6 +27,9 @@ import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
+import { CountCard } from '@/components/ui-foundation/CountCard';
+import { EmptyState } from '@/components/ui-foundation/EmptyState';
+import { cn } from '@/lib/utils';
 import { useDataset } from '@/app/dataset-context';
 import { formatDateTime } from '@/lib/dates';
 import { reviewReasonLabels, type ReviewItem, type ReviewReason } from '@/types/domain';
@@ -87,7 +90,7 @@ export function ReviewQueuePage() {
     <div>
       <PageHeader
         title="Review Queue"
-        description={`${counts.open} open · ${counts.resolved} resolved · ${counts.dismissed} dismissed`}
+        description="Triage review items flagged by importers — approve corrected fields, dismiss false positives, or reject with a reason."
         actions={
           <ExportButton
             filename={`review-queue-${statusFilter}`}
@@ -106,7 +109,42 @@ export function ReviewQueuePage() {
         }
       />
 
-      <div className="flex items-center gap-2 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <CountCard
+          label="Open"
+          value={counts.open}
+          icon={AlertTriangle}
+          tone={counts.open > 0 ? 'expiring' : 'active'}
+          hint={counts.open > 0 ? 'Needs triage' : 'All clear'}
+          onClick={() => setStatusFilter('open')}
+        />
+        <CountCard
+          label="Resolved"
+          value={counts.resolved}
+          icon={CheckCircle2}
+          tone="active"
+          hint="Approved"
+          onClick={() => setStatusFilter('resolved')}
+        />
+        <CountCard
+          label="Dismissed"
+          value={counts.dismissed}
+          icon={Archive}
+          tone="missing"
+          hint="Archived"
+          onClick={() => setStatusFilter('dismissed')}
+        />
+        <CountCard
+          label="All items"
+          value={counts.all}
+          icon={ListChecks}
+          tone="info"
+          hint="In database"
+          onClick={() => setStatusFilter('all')}
+        />
+      </div>
+
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
         {(['open', 'all', 'resolved', 'dismissed'] as StatusFilter[]).map((s) => (
           <Button
             key={s}
@@ -122,14 +160,17 @@ export function ReviewQueuePage() {
 
       {filtered.length === 0 ? (
         <Card>
-          <CardContent className="py-12 text-center">
-            <div className="h-12 w-12 mx-auto rounded-full bg-status-active-soft flex items-center justify-center text-status-active">
-              <CheckCircle2 className="h-6 w-6" />
-            </div>
-            <h3 className="mt-4 text-base font-medium">No items in this view</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Switch filter or import new data to populate the queue.
-            </p>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={statusFilter === 'open' ? CheckCircle2 : Inbox}
+              tone={statusFilter === 'open' ? 'info' : 'default'}
+              title={statusFilter === 'open' ? 'Queue is clear' : 'No items in this view'}
+              description={
+                statusFilter === 'open'
+                  ? 'Every review item has been triaged. New flags will appear here as imports run.'
+                  : 'Switch filter or import new data to populate the queue.'
+              }
+            />
           </CardContent>
         </Card>
       ) : (
@@ -145,7 +186,13 @@ export function ReviewQueuePage() {
               <CardContent className="p-0">
                 <ul className="divide-y">
                   {items.map((item) => (
-                    <li key={item.id} className="px-6 py-3 flex items-start justify-between gap-4">
+                    <li
+                      key={item.id}
+                      className={cn(
+                        'px-6 py-3 flex items-start justify-between gap-4',
+                        'transition-colors duration-fast ease-out-quart hover:bg-muted/30',
+                      )}
+                    >
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium truncate">{item.description}</div>
                         <div className="mt-0.5 text-xs text-muted-foreground truncate">{item.details}</div>

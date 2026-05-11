@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, Pencil, RefreshCw, AlertTriangle, Download } from 'lucide-react';
+import { Search, Pencil, RefreshCw, Download, HeartPulse, ShieldCheck, ShieldOff, Unlink } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,8 @@ import { useMe } from '@/lib/api/use-me';
 import { useEmployees, useInsurance, usePatchInsurance } from '@/lib/api/hooks';
 import { buildInsuranceColumns } from '@/features/insurance/columns';
 import { InsuranceDrawer } from '@/features/insurance/InsuranceDrawer';
+import { CountCard } from '@/components/ui-foundation/CountCard';
+import { ApiErrorState } from '@/components/common/ApiErrorState';
 import type { Insurance, InsuranceStatus, Employee } from '@/types/domain';
 
 const INSURANCE_EDIT_FIELDS: EntityEditField<Insurance>[] = [
@@ -129,6 +131,14 @@ export function InsurancePage() {
   ).length;
   const failedQuery = insQuery.error ?? null;
 
+  const summary = useMemo(() => {
+    const total = insurance.length;
+    const active = insurance.filter((i) => i.status === 'active').length;
+    const expired = insurance.filter((i) => i.status === 'expired').length;
+    const missing = insurance.filter((i) => i.status === 'missing').length;
+    return { total, active, expired, missing };
+  }, [insurance]);
+
   // Phase 3C-2 honesty note. The Bupa CCHI export does not include an
   // explicit policy expiry date column, so `endDate` in production is
   // the import-time fallback (`startDate + 1 year`). Status is now
@@ -190,25 +200,45 @@ export function InsurancePage() {
         }
       />
 
-      {failedQuery ? (
-        <div className="mb-4 rounded-md border border-status-expired/40 bg-status-expired-soft px-4 py-3 text-sm">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 text-status-expired mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-status-expired">Failed to load insurance</div>
-              <div className="text-xs text-muted-foreground mt-1 break-all">
-                {String(failedQuery.message ?? failedQuery)}
-              </div>
-              <Button
-                variant="outline" size="sm" className="mt-2 h-7"
-                onClick={() => { insQuery.refetch(); empQuery.refetch(); }}
-              >
-                <RefreshCw className="h-3 w-3" /> Retry
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {failedQuery && insurance.length === 0 ? (
+        <ApiErrorState
+          title="Cannot load insurance"
+          error={failedQuery}
+          onRetry={async () => { await Promise.all([insQuery.refetch(), empQuery.refetch()]); }}
+        />
+      ) : (
+      <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <CountCard
+          label="Total Policies"
+          value={summary.total}
+          icon={HeartPulse}
+          tone="info"
+          hint={insQuery.isFetching ? 'Refreshing…' : 'In database'}
+        />
+        <CountCard
+          label="Active"
+          value={summary.active}
+          icon={ShieldCheck}
+          tone="active"
+          hint={summary.total > 0 ? `${Math.round((summary.active / summary.total) * 100)}% covered` : '—'}
+        />
+        <CountCard
+          label="Expired"
+          value={summary.expired}
+          icon={ShieldOff}
+          tone={summary.expired > 0 ? 'expired' : 'active'}
+          hint="Policy window closed"
+        />
+        <CountCard
+          label="Unmatched"
+          value={unmatchedCount}
+          icon={Unlink}
+          tone={unmatchedCount > 0 ? 'expired' : 'active'}
+          hint={unmatchedCount > 0 ? 'No employee link' : 'All linked'}
+          to="/review"
+        />
+      </div>
 
       <div className="mb-4 rounded-md border border-status-info/30 bg-status-info-soft px-4 py-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">Status is computed:</span>{' '}
@@ -225,12 +255,14 @@ export function InsurancePage() {
           insQuery.isLoading
             ? 'Loading…'
             : insQuery.error
-              ? 'Data unavailable — fix the error above and retry.'
+              ? 'Stale cache shown — retry to refresh.'
               : insurance.length === 0
                 ? 'No insurance policies in the database yet. Use Import Center to import the Bupa Excel file.'
                 : 'No insurance records match your filters.'
         }
       />
+      </>
+      )}
 
       <BulkActionBar
         selectedCount={selectedIds.size}
@@ -266,6 +298,7 @@ export function InsurancePage() {
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
         title="Filter insurance"
+        description="Narrow the policy list by computed status and employee link state."
         activeCount={activeCount}
         onApply={() => setFilters(filters)}
         onReset={() => setFilters(empty)}

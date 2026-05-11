@@ -6,7 +6,7 @@
  * even if they bypass the FE.
  */
 import { useState, useMemo } from 'react';
-import { Plus, ShieldOff } from 'lucide-react';
+import { Plus, ShieldOff, Users as UsersIcon, ShieldCheck, UserCog, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,9 @@ import {
 } from '@/components/ui/select';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { ExportButton } from '@/components/common/ExportButton';
+import { CountCard } from '@/components/ui-foundation/CountCard';
+import { EmptyState } from '@/components/ui-foundation/EmptyState';
+import { ApiErrorState } from '@/components/common/ApiErrorState';
 import { useMe } from '@/lib/api/use-me';
 import {
   useAppUsers, useCreateAppUser, usePatchAppUser, useDeactivateAppUser,
@@ -62,14 +65,18 @@ export function UsersPage() {
       <div>
         <PageHeader title="Users & Permissions" description="Manage who can use this app and what they can do." />
         <Card>
-          <CardContent className="py-12 text-center">
-            <div className="h-12 w-12 mx-auto rounded-full bg-status-expired-soft flex items-center justify-center text-status-expired">
-              <ShieldOff className="h-6 w-6" />
-            </div>
-            <h3 className="mt-4 text-base font-medium">Administrator access required</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Your current role is <strong>{me?.role ?? 'unknown'}</strong>. Only administrators can view and manage app users.
-            </p>
+          <CardContent className="p-0">
+            <EmptyState
+              icon={ShieldOff}
+              tone="expired"
+              title="Administrator access required"
+              description={
+                <>
+                  Your current role is <strong>{me?.role ?? 'unknown'}</strong>. Only administrators
+                  can view and manage app users.
+                </>
+              }
+            />
           </CardContent>
         </Card>
       </div>
@@ -180,13 +187,44 @@ function UsersTable({ currentEmail }: { currentEmail: string | null }) {
         }
       />
 
-      {error && (
-        <Card className="mb-4 border-status-expired/30 bg-status-expired-soft">
-          <CardContent className="py-3 text-sm text-status-expired">
-            Failed to load users: {error.message}
-          </CardContent>
-        </Card>
-      )}
+      {error && users.length === 0 ? (
+        <ApiErrorState
+          title="Cannot load users"
+          error={error}
+          onRetry={async () => { /* react-query auto-refetches on focus; manual retry not exposed here */ window.location.reload(); }}
+        />
+      ) : (
+      <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <CountCard
+          label="Total Users"
+          value={counts.total}
+          icon={UsersIcon}
+          tone="info"
+          hint="In database"
+        />
+        <CountCard
+          label="Admins"
+          value={counts.admins}
+          icon={ShieldCheck}
+          tone="active"
+          hint="Active admin role"
+        />
+        <CountCard
+          label="HR + Viewers"
+          value={counts.hr + counts.viewers}
+          icon={UserCog}
+          tone="info"
+          hint={`${counts.hr} HR · ${counts.viewers} viewer`}
+        />
+        <CountCard
+          label="Disabled"
+          value={counts.disabled}
+          icon={UserX}
+          tone={counts.disabled > 0 ? 'missing' : 'active'}
+          hint={counts.disabled > 0 ? 'Deactivated' : 'None'}
+        />
+      </div>
 
       <Card>
         <CardContent className="p-0">
@@ -269,6 +307,8 @@ function UsersTable({ currentEmail }: { currentEmail: string | null }) {
           </table>
         </CardContent>
       </Card>
+      </>
+      )}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>

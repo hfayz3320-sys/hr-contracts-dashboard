@@ -16,7 +16,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Users, UserCheck, FileText, Clock, AlertTriangle, CalendarX,
-  HeartPulse, ShieldOff, Upload, UserCog, RefreshCw,
+  HeartPulse, ShieldOff, Upload, UserCog, RefreshCw, ChevronRight,
 } from 'lucide-react';
 import {
   useEmployees, useContracts, useInsurance,
@@ -31,6 +31,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { ExportButton } from '@/components/common/ExportButton';
 import { routes } from '@/lib/routes';
 import { formatDateTime } from '@/lib/dates';
+import { cn } from '@/lib/utils';
 
 type Kpi = { label: string; value: number };
 
@@ -208,23 +209,26 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      {/* KPI strip */}
+      {/* KPI strip — every card is a link to its operational page. The whole
+          card surface lights up on hover/focus and sinks on press, so the
+          dashboard reads as a control panel, not a static report. */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
-        <KpiCard label="Total Employees"      value={k.totalEmployees}            icon={Users}        tone="info" />
-        <KpiCard label="Active Employees"     value={k.activeEmployees}           icon={UserCheck}    tone="active" />
-        <KpiCard label="Active Contracts"     value={k.activeContracts}           icon={FileText}     tone="active" />
-        <KpiCard label="Expiring ≤30d"        value={k.contractsExpiring30}       icon={Clock}        tone="expiring" hint="Next 30 days" />
-        <KpiCard label="Expiring ≤60d"        value={k.contractsExpiring60}       icon={Clock}        tone="expiring" hint="Next 60 days" />
-        <KpiCard label="Expired Contracts"    value={k.expiredContracts}          icon={CalendarX}    tone="expired" />
-        <KpiCard label="Active Insurance"     value={k.activeInsurance}           icon={HeartPulse}   tone="active" />
-        <KpiCard label="Expired/Missing Ins." value={k.expiredOrMissingInsurance} icon={ShieldOff}    tone="missing" />
-        <KpiCard label="Open Review"          value={k.openReview}                icon={AlertTriangle} tone="expiring" />
+        <KpiCard label="Total Employees"      value={k.totalEmployees}            icon={Users}        tone="info"     to={routes.employees} />
+        <KpiCard label="Active Employees"     value={k.activeEmployees}           icon={UserCheck}    tone="active"   to={routes.employees} />
+        <KpiCard label="Active Contracts"     value={k.activeContracts}           icon={FileText}     tone="active"   to={routes.contracts} />
+        <KpiCard label="Expiring ≤30d"        value={k.contractsExpiring30}       icon={Clock}        tone="expiring" hint="Next 30 days" to={routes.contracts} />
+        <KpiCard label="Expiring ≤60d"        value={k.contractsExpiring60}       icon={Clock}        tone="expiring" hint="Next 60 days" to={routes.contracts} />
+        <KpiCard label="Expired Contracts"    value={k.expiredContracts}          icon={CalendarX}    tone="expired"  to={routes.contracts} />
+        <KpiCard label="Active Insurance"     value={k.activeInsurance}           icon={HeartPulse}   tone="active"   to={routes.insurance} />
+        <KpiCard label="Expired/Missing Ins." value={k.expiredOrMissingInsurance} icon={ShieldOff}    tone="missing"  to={routes.insurance} />
+        <KpiCard label="Open Review"          value={k.openReview}                icon={AlertTriangle} tone="expiring" to={routes.review} />
         <KpiCard
           label="Last Import"
           value={k.lastImport ? 1 : 0}
           icon={Upload}
           tone={k.lastImport?.status === 'committed' ? 'active' : k.lastImport?.status === 'failed' ? 'expired' : 'info'}
           hint={k.lastImport ? `${k.lastImport.status} · ${k.lastImport.filename}` : 'No imports yet'}
+          to={routes.imports}
         />
       </div>
 
@@ -290,8 +294,17 @@ export function DashboardPage() {
 
         {/* Recent Imports */}
         <Card className="lg:col-span-2">
-          <CardHeader className="pb-3">
+          <CardHeader className="pb-3 flex flex-row items-center justify-between">
             <CardTitle className="text-base">Recent Imports</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => navigate(routes.imports)}
+            >
+              Open Import Center
+              <ChevronRight className="h-3 w-3" />
+            </Button>
           </CardHeader>
           <CardContent className="p-0">
             {importJobs.length === 0 ? (
@@ -299,20 +312,31 @@ export function DashboardPage() {
             ) : (
               <ul className="divide-y">
                 {importJobs.slice(0, 5).map((j) => (
-                  <li key={j.id} className="px-6 py-2.5 flex items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">{j.filename}</div>
-                      <div className="text-xs text-muted-foreground tabular">
-                        {j.type} · {formatDateTime(j.startedAt)}
+                  <li key={j.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigate(routes.imports)}
+                      className={cn(
+                        'w-full px-6 py-2.5 flex items-center justify-between gap-3 text-left',
+                        'transition-colors duration-fast ease-out-quart',
+                        'hover:bg-muted/40 active:bg-muted/60',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                      )}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate">{j.filename}</div>
+                        <div className="text-xs text-muted-foreground tabular">
+                          {j.type} · {formatDateTime(j.startedAt)}
+                        </div>
                       </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground tabular shrink-0 hidden md:block">
-                      C {j.counts.created} · U {j.counts.updated} · R {j.counts.review} · E {j.counts.error}
-                    </div>
-                    <StatusBadge
-                      status={j.status === 'committed' ? 'active' : j.status === 'failed' ? 'expired' : 'info'}
-                      label={j.status}
-                    />
+                      <div className="text-xs text-muted-foreground tabular shrink-0 hidden md:block">
+                        C {j.counts.created} · U {j.counts.updated} · R {j.counts.review} · E {j.counts.error}
+                      </div>
+                      <StatusBadge
+                        status={j.status === 'committed' ? 'active' : j.status === 'failed' ? 'expired' : 'info'}
+                        label={j.status}
+                      />
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -347,13 +371,33 @@ function ActionRow({
     <button
       type="button"
       onClick={onClick}
-      className="w-full flex items-center justify-between rounded-md border px-3 py-2 text-left hover:bg-muted/40 transition"
+      className={cn(
+        'group w-full flex items-center justify-between rounded-md border px-3 py-2 text-left',
+        'transition-[background-color,border-color,transform,box-shadow] duration-fast ease-out-quart',
+        'hover:bg-muted/50 hover:border-primary/30 hover:-translate-y-px hover:shadow-hover',
+        'active:translate-y-[1px] active:shadow-press active:duration-75',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+      )}
     >
-      <div className="flex items-center gap-2">
-        <span className={`h-1.5 w-1.5 rounded-full bg-status-${tone}`} />
-        <span className="text-sm">{label}</span>
+      <div className="flex items-center gap-2 min-w-0">
+        <span
+          className={cn(
+            'h-2 w-2 rounded-full shrink-0',
+            tone === 'active' && 'bg-status-active',
+            tone === 'expiring' && 'bg-status-expiring shadow-[0_0_6px_hsl(var(--status-expiring)/0.6)]',
+            tone === 'expired' && 'bg-status-expired shadow-[0_0_6px_hsl(var(--status-expired)/0.6)]',
+          )}
+          aria-hidden="true"
+        />
+        <span className="text-sm truncate">{label}</span>
       </div>
-      <span className="text-xs text-muted-foreground">{hint}</span>
+      <span className="flex items-center gap-1 text-xs text-muted-foreground shrink-0">
+        {hint}
+        <ChevronRight
+          className="h-3 w-3 transition-transform duration-fast ease-out-quart group-hover:translate-x-0.5"
+          aria-hidden="true"
+        />
+      </span>
     </button>
   );
 }

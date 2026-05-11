@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, Pencil, RefreshCw, AlertTriangle, Download } from 'lucide-react';
+import { Search, Pencil, RefreshCw, Download, FileText, Clock, Unlink } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -16,6 +16,8 @@ import { useMe } from '@/lib/api/use-me';
 import { useContracts, useEmployees, usePatchContract } from '@/lib/api/hooks';
 import { buildContractColumns } from '@/features/contracts/columns';
 import { ContractDrawer } from '@/features/contracts/ContractDrawer';
+import { CountCard } from '@/components/ui-foundation/CountCard';
+import { ApiErrorState } from '@/components/common/ApiErrorState';
 import type { Contract, ContractStatus, Employee } from '@/types/domain';
 
 const CONTRACT_EDIT_FIELDS: EntityEditField<Contract>[] = [
@@ -124,6 +126,23 @@ export function ContractsPage() {
   ).size;
   const failedQuery = conQuery.error ?? null;
 
+  // Summary stats for the strip above the table.
+  const summary = useMemo(() => {
+    const total = contracts.length;
+    const active = contracts.filter((c) => c.status === 'active').length;
+    const now = Date.now();
+    const expiringSoon = contracts.filter((c) => {
+      if (c.status !== 'active') return false;
+      if (!c.endDate) return false;
+      const d = new Date(c.endDate).getTime();
+      if (Number.isNaN(d)) return false;
+      const days = Math.floor((d - now) / (1000 * 60 * 60 * 24));
+      return days >= 0 && days <= 60;
+    }).length;
+    const expired = contracts.filter((c) => c.status === 'expired').length;
+    return { total, active, expiringSoon, expired };
+  }, [contracts]);
+
   return (
     <div>
       <PageHeader
@@ -175,25 +194,45 @@ export function ContractsPage() {
         }
       />
 
-      {failedQuery ? (
-        <div className="mb-4 rounded-md border border-status-expired/40 bg-status-expired-soft px-4 py-3 text-sm">
-          <div className="flex items-start gap-2">
-            <AlertTriangle className="h-4 w-4 text-status-expired mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-status-expired">Failed to load contracts</div>
-              <div className="text-xs text-muted-foreground mt-1 break-all">
-                {String(failedQuery.message ?? failedQuery)}
-              </div>
-              <Button
-                variant="outline" size="sm" className="mt-2 h-7"
-                onClick={() => { conQuery.refetch(); empQuery.refetch(); }}
-              >
-                <RefreshCw className="h-3 w-3" /> Retry
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+      {failedQuery && contracts.length === 0 ? (
+        <ApiErrorState
+          title="Cannot load contracts"
+          error={failedQuery}
+          onRetry={async () => { await Promise.all([conQuery.refetch(), empQuery.refetch()]); }}
+        />
+      ) : (
+      <>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        <CountCard
+          label="Total Contracts"
+          value={summary.total}
+          icon={FileText}
+          tone="info"
+          hint={conQuery.isFetching ? 'Refreshing…' : 'In database'}
+        />
+        <CountCard
+          label="Active"
+          value={summary.active}
+          icon={FileText}
+          tone="active"
+          hint={summary.total > 0 ? `${Math.round((summary.active / summary.total) * 100)}% of total` : '—'}
+        />
+        <CountCard
+          label="Expiring ≤60d"
+          value={summary.expiringSoon}
+          icon={Clock}
+          tone={summary.expiringSoon > 0 ? 'expiring' : 'active'}
+          hint="Active windows closing soon"
+        />
+        <CountCard
+          label="Unmatched"
+          value={unmatchedCount}
+          icon={Unlink}
+          tone={unmatchedCount > 0 ? 'expired' : 'active'}
+          hint={unmatchedCount > 0 ? 'No employee link' : 'All linked'}
+          to="/review"
+        />
+      </div>
 
       <SelectableDataTable
         data={filtered}
@@ -205,12 +244,14 @@ export function ContractsPage() {
           conQuery.isLoading
             ? 'Loading…'
             : conQuery.error
-              ? 'Data unavailable — fix the error above and retry.'
+              ? 'Stale cache shown — retry to refresh.'
               : contracts.length === 0
                 ? 'No contracts in the database yet. Use Import Center to import PDFs.'
                 : 'No contracts match your filters.'
         }
       />
+      </>
+      )}
 
       <BulkActionBar
         selectedCount={selectedIds.size}
@@ -246,6 +287,7 @@ export function ContractsPage() {
         open={filtersOpen}
         onOpenChange={setFiltersOpen}
         title="Filter contracts"
+        description="Filter the contract list by lifecycle status and template type."
         activeCount={activeCount}
         onApply={() => setFilters(filters)}
         onReset={() => setFilters(empty)}
