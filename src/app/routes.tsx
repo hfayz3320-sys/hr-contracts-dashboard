@@ -13,6 +13,12 @@ import { SettingsPage } from '@/pages/SettingsPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { DesignLabPage } from '@/pages/design-lab/DesignLabPage';
 import { HrErpDesignLab } from '@/pages/design-lab/hr-erp';
+// Phase 8 — Admin module shell.
+import { AdminGuard } from '@/components/common/AdminGuard';
+import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
+import { AdminImportPage } from '@/pages/admin/AdminImportPage';
+import { AdminConfigPage } from '@/pages/admin/AdminConfigPage';
+import { AdminDataQualityPage } from '@/pages/admin/AdminDataQualityPage';
 import { routes } from '@/lib/routes';
 
 export const routeTree: RouteObject[] = [
@@ -34,12 +40,31 @@ export const routeTree: RouteObject[] = [
       { path: 'employees/:id', element: <EmployeeProfilePage /> },
       { path: 'contracts', element: <ContractsPage /> },
       { path: 'insurance', element: <InsurancePage /> },
+      // Legacy routes — kept working for backward compatibility. New nav
+      // entries route through the Admin module at /admin/*.
       { path: 'imports',  element: <ImportsPage /> },
       { path: 'imports/new', element: <ImportsPage /> },
       { path: 'review',   element: <ReviewQueuePage /> },
       { path: 'users',    element: <UsersPage /> },
-      { path: 'admin',    element: <AdminPage /> },
       { path: 'settings', element: <SettingsPage /> },
+
+      // Phase 8 — Admin module. AdminGuard short-circuits non-admin /
+      // non-hr_manager callers with a friendly forbidden surface. Worker
+      // endpoints remain the source of truth via requireAdmin.
+      {
+        path: 'admin',
+        element: <AdminGuard />,
+        children: [
+          { index: true,            element: <AdminDashboardPage /> },
+          { path: 'import',         element: <AdminImportPage /> },
+          { path: 'review',         element: <ReviewQueuePage /> },
+          { path: 'import-history', element: <AdminPage /> },
+          { path: 'users',          element: <UsersPage /> },
+          { path: 'config',         element: <AdminConfigPage /> },
+          { path: 'data-quality',   element: <AdminDataQualityPage /> },
+        ],
+      },
+
       { path: '*', element: <NotFoundPage /> },
     ],
   },

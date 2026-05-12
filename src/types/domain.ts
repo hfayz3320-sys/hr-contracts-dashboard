@@ -128,7 +128,11 @@ export type ReviewReason =
   | 'unmatched_contract'
   | 'unmatched_insurance'
   | 'low_confidence_extraction'
-  | 'missing_contract_fields';
+  | 'missing_contract_fields'
+  // Phase 8 — keep aligned with shared/domain.ts ReviewReason.
+  | 'duration_negative'
+  | 'unknown_template'
+  | 'missing_full_name';
 
 export type ReviewItemEntity = 'employee' | 'contract' | 'insurance';
 export type ReviewItemStatus = 'open' | 'resolved' | 'dismissed';
@@ -173,6 +177,10 @@ export const reviewReasonLabels: Record<ReviewReason, string> = {
   unmatched_insurance: 'Insurance not matched to a person',
   low_confidence_extraction: 'Low-confidence PDF extraction',
   missing_contract_fields: 'Contract missing dates / type / file',
+  // Phase 8 — keep aligned with shared/domain.ts reviewReasonLabels.
+  duration_negative: 'Contract end date before start date',
+  unknown_template: 'PDF template not recognised',
+  missing_full_name: 'Missing employee full name',
 };
 
 // =============================================================================

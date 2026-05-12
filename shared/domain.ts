@@ -163,7 +163,12 @@ export type ReviewReason =
   | 'conflicting_employee_number'
   | 'unmatched_contract'
   | 'unmatched_insurance'
-  | 'low_confidence_extraction';
+  | 'low_confidence_extraction'
+  | 'missing_contract_fields'
+  // Phase 8 — keep aligned with reviewReasonSchema in shared/api-contract.ts.
+  | 'duration_negative'
+  | 'unknown_template'
+  | 'missing_full_name';
 
 export type ReviewItemEntity = 'employee' | 'contract' | 'insurance';
 export type ReviewItemStatus = 'open' | 'resolved' | 'dismissed';
@@ -400,6 +405,11 @@ export const reviewReasonLabels: Record<ReviewReason, string> = {
   unmatched_contract: 'Contract not matched to a person',
   unmatched_insurance: 'Insurance not matched to a person',
   low_confidence_extraction: 'Low-confidence PDF extraction',
+  missing_contract_fields: 'Contract missing required fields',
+  // Phase 8 — lifecycle defects caught at import time.
+  duration_negative: 'Contract end date before start date',
+  unknown_template: 'PDF template not recognised',
+  missing_full_name: 'Missing employee full name',
 };
 
 // ============================================================================

@@ -45,11 +45,8 @@ import {
   Users,
   FileText,
   HeartPulse,
-  Upload,
-  AlertTriangle,
   ShieldCheck,
   Settings,
-  UserCog,
   Pin,
   PinOff,
   Menu,
@@ -77,10 +74,11 @@ const NAV: NavEntry[] = [
   { to: routes.employees, label: 'Employees',           icon: Users },
   { to: routes.contracts, label: 'Contracts',           icon: FileText },
   { to: routes.insurance, label: 'Medical Insurance',   icon: HeartPulse },
-  { to: routes.imports,   label: 'Import Center',       icon: Upload },
-  { to: routes.review,    label: 'Review Queue',        icon: AlertTriangle },
-  { to: routes.users,     label: 'Users & Permissions', icon: UserCog, adminOnly: true },
-  { to: routes.admin,     label: 'Admin · Audit',       icon: ShieldCheck },
+  // Phase 8 — Import / Review / Users / Audit collapse into a single
+  // adminOnly Admin entry. Non-admin users no longer see ingestion entry
+  // points in the nav, even though the server endpoints would still
+  // refuse them.
+  { to: routes.admin,     label: 'Admin',               icon: ShieldCheck, adminOnly: true },
   { to: routes.settings,  label: 'Settings',            icon: Settings },
 ];
 
@@ -106,10 +104,13 @@ function writePinned(v: boolean): void {
 
 export function HoverRailSidebar() {
   const { data: me } = useMe();
-  const isAdmin = me?.isAdmin === true;
+  // Phase 8: admin entry is visible to admin OR hr_manager. Same predicate
+  // as `canAccessAdmin` in src/lib/auth.ts — kept local to avoid bundling
+  // the helper into the rail.
+  const canSeeAdmin = me != null && me.status === 'active' && (me.isAdmin === true || me.role === 'hr_manager');
   const visibleNav = React.useMemo(
-    () => NAV.filter((n) => !n.adminOnly || isAdmin),
-    [isAdmin],
+    () => NAV.filter((n) => !n.adminOnly || canSeeAdmin),
+    [canSeeAdmin],
   );
 
   const [pinned, setPinned] = React.useState<boolean>(() => readPinned());
@@ -440,10 +441,11 @@ void EASE_OUT_QUART;
  */
 export function MobileNavSheet() {
   const { data: me } = useMe();
-  const isAdmin = me?.isAdmin === true;
+  // Phase 8: same predicate as the desktop rail (admin OR hr_manager).
+  const canSeeAdmin = me != null && me.status === 'active' && (me.isAdmin === true || me.role === 'hr_manager');
   const visibleNav = React.useMemo(
-    () => NAV.filter((n) => !n.adminOnly || isAdmin),
-    [isAdmin],
+    () => NAV.filter((n) => !n.adminOnly || canSeeAdmin),
+    [canSeeAdmin],
   );
   const [open, setOpen] = React.useState(false);
   const location = useLocation();

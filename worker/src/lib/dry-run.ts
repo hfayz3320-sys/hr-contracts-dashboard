@@ -141,6 +141,8 @@ async function resolveContractRow(
   const startDate = strField(row, 'startDate') ?? strField(row, 'start_date');
   const endDate = strField(row, 'endDate') ?? strField(row, 'end_date');
   const fileHash = strField(row, 'fileHash') ?? strField(row, 'file_hash');
+  const templateType = strField(row, 'templateType') ?? strField(row, 'template_type');
+  const confidence = numField(row, 'extractionConfidence') ?? numField(row, 'extraction_confidence');
 
   if (!identity) {
     return { rowIndex, identityNumber: null, resolvedAction: 'review', reason: 'missing_identity' };
@@ -156,6 +158,36 @@ async function resolveContractRow(
       identityNumber: identity,
       resolvedAction: 'review',
       reason: 'missing_contract_fields',
+    };
+  }
+
+  // Phase 8 — enforce the lifecycle review rule at IMPORT time, not just at
+  // read time. A contract whose end_date is before its start_date is a
+  // genuine defect; a contract whose template the parser couldn't recognise
+  // needs human eyes before it lands in the table; a low-confidence
+  // extraction should be triaged.
+  if (endDate < startDate) {
+    return {
+      rowIndex,
+      identityNumber: identity,
+      resolvedAction: 'review',
+      reason: 'duration_negative',
+    };
+  }
+  if (templateType === 'unknown') {
+    return {
+      rowIndex,
+      identityNumber: identity,
+      resolvedAction: 'review',
+      reason: 'unknown_template',
+    };
+  }
+  if (confidence !== undefined && confidence < 0.6) {
+    return {
+      rowIndex,
+      identityNumber: identity,
+      resolvedAction: 'review',
+      reason: 'low_confidence_extraction',
     };
   }
 
@@ -247,6 +279,11 @@ async function resolveInsuranceRow(
 function strField(row: Record<string, unknown>, key: string): string | undefined {
   const v = row[key];
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+}
+
+function numField(row: Record<string, unknown>, key: string): number | undefined {
+  const v = row[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 
 function optStr<K extends string>(row: Record<string, unknown>, [outKey, inKey]: [K, string]) {

@@ -67,6 +67,11 @@ export async function parseExcelFile(
 
   const sheets: ParsedSheet[] = [];
   const fileWarnings: string[] = [];
+  // Phase 8 — collect every header we saw across every sheet that did NOT
+  // match. When the whole workbook matches zero sheets the admin needs to
+  // see what headers they sent us so they can extend the synonym list
+  // without first opening the file.
+  const seenUnknownHeaders = new Set<string>();
 
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
@@ -87,6 +92,10 @@ export async function parseExcelFile(
       fileWarnings.push(
         `Sheet "${sheetName}" did not match the ${importType} schema and was skipped.`,
       );
+      // Capture the headers we DID see in this rejected sheet.
+      for (const h of Object.keys(json[0] ?? {})) {
+        if (h && h.trim() !== '') seenUnknownHeaders.add(h.trim());
+      }
       continue;
     }
 
@@ -102,11 +111,14 @@ export async function parseExcelFile(
   }
 
   if (sheets.length === 0) {
+    const sample = Array.from(seenUnknownHeaders).slice(0, 12);
+    const more = seenUnknownHeaders.size > sample.length ? ` (+${seenUnknownHeaders.size - sample.length} more)` : '';
     fileWarnings.push(
       `No sheets in this workbook matched the ${importType} schema. ` +
-        `Check that the file is the correct import type and that the column ` +
-        `headers match either the English or Arabic conventions documented ` +
-        `for ${importType}.`,
+        (sample.length > 0
+          ? `Headers we saw: ${sample.join(', ')}${more}. `
+          : 'No headers were detected at all. ') +
+        `Verify the import type matches the file, and extend the ${importType} header dictionary if these are legitimate columns.`,
     );
   }
 

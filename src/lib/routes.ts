@@ -9,6 +9,15 @@ export const routes = {
   users: '/users',
   admin: '/admin',
   settings: '/settings',
+  // Phase 8 — Admin module sub-routes. All gated by AdminGuard (admin or
+  // hr_manager only). Legacy /imports, /review, /users keep working for
+  // backward compatibility; nav points at the /admin/* variants.
+  adminImport: '/admin/import',
+  adminReview: '/admin/review',
+  adminImportHistory: '/admin/import-history',
+  adminUsers: '/admin/users',
+  adminConfig: '/admin/config',
+  adminDataQuality: '/admin/data-quality',
 } as const;
 
 export type RouteKey = keyof typeof routes;

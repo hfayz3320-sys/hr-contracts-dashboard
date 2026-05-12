@@ -20,6 +20,12 @@ export const reviewReasonSchema = z.enum([
   'unmatched_insurance',
   'low_confidence_extraction',
   'missing_contract_fields',
+  // Phase 8 — explicit reasons for the contract PDF pipeline so the import
+  // time enforces the same lifecycle rule as the read-time classifier
+  // (`isContractReviewRequired`). Same vocabulary on both sides of the wire.
+  'duration_negative',
+  'unknown_template',
+  'missing_full_name',
 ]);
 export const reviewEntitySchema = z.enum(['employee', 'contract', 'insurance']);
 export const reviewStatusSchema = z.enum(['open', 'resolved', 'dismissed']);

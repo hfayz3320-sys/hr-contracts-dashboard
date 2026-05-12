@@ -351,6 +351,10 @@ function mapItemReasonToReviewReason(reason: string): string {
     case 'low_confidence_extraction':
     case 'group_insurance_member_missing':
     case 'missing_contract_fields':
+    // Phase 8 — contract-pipeline reasons (mirrors reviewReasonSchema).
+    case 'duration_negative':
+    case 'unknown_template':
+    case 'missing_full_name':
       return reason;
     default:
       return 'missing_identity';

@@ -217,6 +217,11 @@ export function ImportWizard() {
               endDate: c.endDate,
               fileHash: c.fileHash,
               filename: c.filename,
+              // Phase 8: pass templateType + extractionConfidence to the
+              // dry-run resolver so unknown templates and low-confidence
+              // extractions are routed to Review Required, not silently
+              // committed.
+              templateType: c.templateType,
               extractionConfidence: c.extractionConfidence,
             }));
 
