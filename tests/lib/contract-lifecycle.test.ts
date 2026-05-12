@@ -12,6 +12,7 @@ import {
   isContractReviewRequired,
   contractDataQualityLabel,
   isInformationalDataQualityFlag,
+  classifyContractLifecycle,
 } from '../../src/lib/contract-lifecycle';
 import type { Contract } from '@shared/domain';
 
@@ -174,5 +175,74 @@ describe('contractDataQualityLabel + isInformationalDataQualityFlag', () => {
     expect(isInformationalDataQualityFlag('duration_negative')).toBe(false);
     expect(isInformationalDataQualityFlag('start_date_missing')).toBe(false);
     expect(isInformationalDataQualityFlag(undefined)).toBe(false);
+  });
+});
+
+describe('classifyContractLifecycle (Phase 7B — per-contract bucket)', () => {
+  it('classifies an active window covering today as current', () => {
+    expect(
+      classifyContractLifecycle(
+        c({ startDate: '2024-01-01', endDate: '2027-01-01' }),
+        '2026-05-12',
+      ),
+    ).toBe('current');
+  });
+
+  it('classifies a contract whose start is in the future as future', () => {
+    expect(
+      classifyContractLifecycle(
+        c({ startDate: '2027-01-01', endDate: '2029-01-01' }),
+        '2026-05-12',
+      ),
+    ).toBe('future');
+  });
+
+  it('classifies an expired contract as history — NOT a defect', () => {
+    expect(
+      classifyContractLifecycle(
+        c({ startDate: '2020-01-01', endDate: '2022-01-01' }),
+        '2026-05-12',
+      ),
+    ).toBe('history');
+  });
+
+  it('classifies a negative-duration contract as review_required', () => {
+    expect(
+      classifyContractLifecycle(
+        c({ startDate: '2024-06-01', endDate: '2024-05-30' }),
+        '2026-05-12',
+      ),
+    ).toBe('review_required');
+  });
+
+  it('classifies a contract with empty template as review_required', () => {
+    expect(
+      classifyContractLifecycle(
+        c({ contractType: '', startDate: '2024-01-01', endDate: '2027-01-01' }),
+        '2026-05-12',
+      ),
+    ).toBe('review_required');
+  });
+
+  it('classifies an unmatched (missing identity) contract as review_required', () => {
+    expect(
+      classifyContractLifecycle(
+        c({ identityNumber: '', startDate: '2024-01-01', endDate: '2027-01-01' }),
+        '2026-05-12',
+      ),
+    ).toBe('review_required');
+  });
+
+  it('a long-term (>3y) expired contract is still history — informational flag does not promote to defect', () => {
+    expect(
+      classifyContractLifecycle(
+        c({
+          startDate: '2018-01-01',
+          endDate: '2022-01-01',
+          dataQualityIssue: 'duration_over_3_years',
+        }),
+        '2026-05-12',
+      ),
+    ).toBe('history');
   });
 });

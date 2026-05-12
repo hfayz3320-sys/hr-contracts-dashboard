@@ -140,6 +140,28 @@ export function splitContractsByLifecycle(
 }
 
 /**
+ * Classify a single contract into a lifecycle bucket (Phase 7B).
+ *
+ * Unlike `splitContractsByLifecycle` — which scopes "current" to one row
+ * per employee — this classifier looks at one contract in isolation. For
+ * the global Contracts page (across all employees) every active-window
+ * contract is "current"; the per-employee deduplication doesn't apply.
+ *
+ * Same business rule applies: old / expired / long / short contracts are
+ * history, NOT defects. Only end<start / missing dates / unknown template
+ * / unmatched land in review_required.
+ */
+export function classifyContractLifecycle(
+  c: Contract,
+  today: string = isoDay(),
+): ContractLifecycleBucket {
+  if (isContractReviewRequired(c)) return 'review_required';
+  if (c.startDate > today) return 'future';
+  if (c.endDate < today)   return 'history';
+  return 'current';
+}
+
+/**
  * Plain-English label for the per-contract `dataQualityIssue` enum.
  * Used in chips next to rows. Informational long/short flags are shown but
  * marked clearly as informational, not as defects.

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, Pencil, RefreshCw, Download, FileText, Clock, Unlink } from 'lucide-react';
+import { Search, Pencil, RefreshCw, Download, CheckCircle2, Calendar, History, AlertTriangle } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -16,8 +16,9 @@ import { useMe } from '@/lib/api/use-me';
 import { useContracts, useEmployees, usePatchContract } from '@/lib/api/hooks';
 import { buildContractColumns } from '@/features/contracts/columns';
 import { ContractDrawer } from '@/features/contracts/ContractDrawer';
-import { CountCard } from '@/components/ui-foundation/CountCard';
 import { ApiErrorState } from '@/components/common/ApiErrorState';
+import { cn } from '@/lib/utils';
+import { classifyContractLifecycle, type ContractLifecycleBucket } from '@/lib/contract-lifecycle';
 import type { Contract, ContractStatus, Employee } from '@/types/domain';
 
 const CONTRACT_EDIT_FIELDS: EntityEditField<Contract>[] = [
@@ -51,6 +52,16 @@ function buildContractExportColumns(empById: Map<string, Employee>) {
 type Filters = { status: ContractStatus[]; types: string[] };
 const empty: Filters = { status: [], types: [] };
 
+type LifecycleFilter = 'all' | ContractLifecycleBucket;
+
+const LIFECYCLE_TABS: { key: LifecycleFilter; label: string; icon: React.ComponentType<{ className?: string }>; tone: 'default' | 'active' | 'info' | 'expired' }[] = [
+  { key: 'all',              label: 'All',              icon: Search,         tone: 'default' },
+  { key: 'current',          label: 'Current',          icon: CheckCircle2,   tone: 'active'  },
+  { key: 'future',           label: 'Future',           icon: Calendar,       tone: 'info'    },
+  { key: 'history',          label: 'History',          icon: History,        tone: 'default' },
+  { key: 'review_required',  label: 'Review required',  icon: AlertTriangle,  tone: 'expired' },
+];
+
 export function ContractsPage() {
   // Phase 3A: react-query direct. Phase 3B: opt-in joined employee
   // summary so each row carries `employeeSummary` server-side. The
@@ -65,21 +76,41 @@ export function ContractsPage() {
   const [search, setSearch] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>(empty);
+  // Phase 7B: lifecycle is the primary axis of the page. Default lands
+  // on "Current" so the page opens on actionable rows; History (old/
+  // expired) is one click away and never gets auto-flagged as a defect.
+  const [lifecycle, setLifecycle] = useState<LifecycleFilter>('current');
 
   const employeesById = useMemo(() => new Map(employees.map((e) => [e.id, e])), [employees]);
 
   const allTypes = useMemo(() => Array.from(new Set(contracts.map((c) => c.contractType))).sort(), [contracts]);
 
+  // Lifecycle classification — derived once per contracts change. Same
+  // business rule as Employee 360: expired contracts are HISTORY records,
+  // not data defects. Only `isContractReviewRequired` rows hit Review.
+  const lifecycleByContract = useMemo(() => {
+    const map = new Map<string, ContractLifecycleBucket>();
+    for (const c of contracts) map.set(c.id, classifyContractLifecycle(c));
+    return map;
+  }, [contracts]);
+
+  const lifecycleCounts = useMemo(() => {
+    const counts = { current: 0, future: 0, history: 0, review_required: 0 };
+    for (const b of lifecycleByContract.values()) counts[b] = (counts[b] ?? 0) + 1;
+    return counts;
+  }, [lifecycleByContract]);
+
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();
     return contracts.filter((c) => {
+      if (lifecycle !== 'all' && lifecycleByContract.get(c.id) !== lifecycle) return false;
       const emp = employeesById.get(c.employeeId);
       if (s && !c.identityNumber.includes(s) && !(emp?.fullName.toLowerCase().includes(s) ?? false)) return false;
       if (filters.status.length > 0 && !filters.status.includes(c.status)) return false;
       if (filters.types.length > 0 && !filters.types.includes(c.contractType)) return false;
       return true;
     });
-  }, [contracts, employeesById, search, filters]);
+  }, [contracts, employeesById, search, filters, lifecycle, lifecycleByContract]);
 
   const selected = id ? contracts.find((c) => c.id === id) ?? null : null;
 
@@ -202,36 +233,71 @@ export function ContractsPage() {
         />
       ) : (
       <>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-        <CountCard
-          label="Total Contracts"
-          value={summary.total}
-          icon={FileText}
-          tone="info"
-          hint={conQuery.isFetching ? 'Refreshing…' : 'In database'}
-        />
-        <CountCard
-          label="Active"
-          value={summary.active}
-          icon={FileText}
-          tone="active"
-          hint={summary.total > 0 ? `${Math.round((summary.active / summary.total) * 100)}% of total` : '—'}
-        />
-        <CountCard
-          label="Expiring ≤60d"
-          value={summary.expiringSoon}
-          icon={Clock}
-          tone={summary.expiringSoon > 0 ? 'expiring' : 'active'}
-          hint="Active windows closing soon"
-        />
-        <CountCard
-          label="Unmatched"
-          value={unmatchedCount}
-          icon={Unlink}
-          tone={unmatchedCount > 0 ? 'expired' : 'active'}
-          hint={unmatchedCount > 0 ? 'No employee link' : 'All linked'}
-          to="/review"
-        />
+      {/* Phase 7B: lifecycle is the primary axis. Sections replace the
+          old 4-CountCard strip — single source of truth for "what does
+          today look like" without auto-flagging expired contracts as
+          defects. */}
+      <div className="mb-5 rounded-lg border bg-card overflow-hidden">
+        <div className="px-4 py-2 border-b text-[11px] uppercase tracking-[0.06em] text-muted-foreground font-medium flex items-center gap-3">
+          <span>Lifecycle</span>
+          <span className="text-foreground/60">·</span>
+          <span className="normal-case text-foreground">
+            {summary.total} contracts · {distinctLinkedEmployees} employees
+            {summary.expiringSoon > 0 && (
+              <> · <span className="text-status-expiring font-medium">{summary.expiringSoon} expiring ≤60d</span></>
+            )}
+            {unmatchedCount > 0 && (
+              <> · <span className="text-status-expired font-medium">{unmatchedCount} unmatched</span></>
+            )}
+          </span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-border">
+          {LIFECYCLE_TABS.map((t) => {
+            const count =
+              t.key === 'all' ? summary.total :
+              lifecycleCounts[t.key] ?? 0;
+            const sel = lifecycle === t.key;
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setLifecycle(t.key)}
+                aria-pressed={sel}
+                className={cn(
+                  'group relative px-4 py-3 text-left',
+                  'transition-[background-color,transform] duration-fast ease-out-quart',
+                  'hover:bg-muted/40 active:translate-y-[1px] active:duration-75',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                  sel && 'bg-[hsl(var(--status-info-soft))]',
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={cn(
+                    'h-7 w-7 rounded-md flex items-center justify-center',
+                    t.tone === 'active'   ? 'bg-status-active-soft  text-[hsl(var(--status-active))]'   :
+                    t.tone === 'info'     ? 'bg-status-info-soft    text-[hsl(var(--status-info))]'     :
+                    t.tone === 'expired'  ? 'bg-status-expired-soft text-[hsl(var(--status-expired))]'  :
+                                            'bg-muted text-muted-foreground',
+                  )}>
+                    <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="text-[10.5px] uppercase tracking-[0.06em] text-muted-foreground font-medium">{t.label}</div>
+                    <div className="mt-0.5 text-[20px] font-semibold tabular-nums leading-none tracking-tight">{count}</div>
+                  </div>
+                </div>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'absolute left-0 right-0 -bottom-px h-[2px] rounded-t transition-colors duration-fast',
+                    sel ? 'bg-foreground' : 'bg-transparent group-hover:bg-border',
+                  )}
+                />
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <SelectableDataTable
@@ -247,7 +313,13 @@ export function ContractsPage() {
               ? 'Stale cache shown — retry to refresh.'
               : contracts.length === 0
                 ? 'No contracts in the database yet. Use Import Center to import PDFs.'
-                : 'No contracts match your filters.'
+                : lifecycle === 'history'
+                  ? 'No history in this view. Old or expired contracts are kept as history records, not defects.'
+                  : lifecycle === 'review_required'
+                    ? 'No review items. All contracts have intact dates and a known template.'
+                    : lifecycle !== 'all'
+                      ? `No contracts in the ${lifecycle} bucket match your search / filters.`
+                      : 'No contracts match your filters.'
         }
       />
       </>
