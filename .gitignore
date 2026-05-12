@@ -25,6 +25,9 @@ dist/data/
 # identity numbers from the production data — they must NEVER be tracked.
 .import-tmp/
 backups/
+# Phase 10+ — `wrangler d1 export` dumps land here pre-migration so we
+# can roll back. Same PII rule: never tracked.
+.backups/
 
 # env / secrets
 .env

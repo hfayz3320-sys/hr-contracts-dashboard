@@ -75,6 +75,19 @@ export function AdminDashboardPage() {
         />
 
         <AdminCard
+          to={routes.adminImportReview}
+          icon={AlertTriangle}
+          tone="expiring"
+          title="Import Review"
+          description="Edit extracted contract fields before commit. Fix wrong OCR values, missing identity, end-before-start, and confirm the import row by row."
+          status={
+            importJobs.isLoading
+              ? { kind: 'loading' }
+              : { kind: 'empty', label: 'Pre-commit review' }
+          }
+        />
+
+        <AdminCard
           to={routes.adminReview}
           icon={AlertTriangle}
           tone="expiring"

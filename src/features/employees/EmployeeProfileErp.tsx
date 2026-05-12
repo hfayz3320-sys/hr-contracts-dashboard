@@ -58,6 +58,14 @@ import type {
   AppUser,
 } from '@shared/api-contract';
 
+// Phase 11 — shape of the server-derived "current" payload.
+interface CurrentCompensationView {
+  currency: string;
+  monthlyTotal: number;
+  sourceContractId: string | null;
+  lines: EmployeeCompensationLine[];
+}
+
 import { AliveButton } from '@/components/ui-foundation/AliveButton';
 import { Chip } from '@/components/ui-foundation/Chip';
 import { SmartButton } from '@/components/ui-foundation/SmartButton';
@@ -95,6 +103,10 @@ export interface EmployeeProfileErpProps {
   /** The app_users row linked to this employee, or null. Pre-migration-0007
    *  workers don't return this — undefined is interpreted as "unknown". */
   linkedUser?: AppUser | null;
+  /** Phase 11 — server-derived current contract (window covers today). */
+  currentContract?: Contract | null;
+  /** Phase 11 — server-derived current monthly compensation. */
+  currentCompensation?: CurrentCompensationView | null;
 }
 
 const TABS = [
@@ -259,14 +271,14 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
 
         {/* TAB CONTENT */}
         <div className="space-y-4">
-          {tab === 'summary'      && <SummarySection split={split} insurance={insurance} documents={documents.length} transactions={transactions.length} dq={dataQuality} />}
+          {tab === 'summary'      && <SummarySection split={split} insurance={insurance} documents={documents.length} transactions={transactions.length} dq={dataQuality} currentContract={props.currentContract ?? split.current ?? null} currentCompensation={props.currentCompensation ?? null} />}
           {tab === 'personal'     && <PersonalSection employee={e} redactedIdentity={redactedIdentity} />}
           {tab === 'job'          && <JobSection employee={e} currentEmployeeNumber={currentEmployeeNumber} />}
           {tab === 'contracts'    && <ContractsLifecycle split={split} />}
           {tab === 'insurance'    && <InsuranceSection rows={insurance} />}
           {tab === 'documents'    && <DocumentsSection rows={documents} employeeId={e.id} />}
           {tab === 'transactions' && <TransactionsSection rows={transactions} />}
-          {tab === 'payroll'      && <PayrollSection lines={compensation} canWrite={canWrite} onAdd={() => setAction('compensation')} />}
+          {tab === 'payroll'      && <PayrollSection lines={compensation} contracts={contracts} canWrite={canWrite} onAdd={() => setAction('compensation')} />}
           {tab === 'learning'     && <LearningSection records={learning} canWrite={canWrite} onAdd={() => setAction('learning')} />}
           {tab === 'audit'        && <AuditAndDataQualitySection audit={audit} dq={dataQuality} reviewCount={split.reviewRequired.length} canSee={canSeeDataQuality} />}
         </div>
@@ -298,29 +310,73 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
 // ============================================================
 
 function SummarySection({
-  split, insurance, documents, transactions, dq,
+  split, insurance, documents, transactions, dq, currentContract, currentCompensation,
 }: {
   split: ContractLifecycleSplit;
   insurance: Insurance[];
   documents: number;
   transactions: number;
   dq?: EmployeeDataQualityReport;
+  currentContract: Contract | null;
+  currentCompensation: CurrentCompensationView | null;
 }) {
   const activeInsurance = insurance.filter((i) => i.status === 'active').length;
+  // Days to expiry — positive when in the future, negative when past.
+  const daysToExpiry = currentContract && currentContract.endDate
+    ? Math.round(
+        (new Date(currentContract.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+      )
+    : null;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Panel title="Lifecycle">
+      <Panel title="Current contract">
         <dl>
           <FormRow
-            label="Current contract"
+            label="Type & version"
             value={
-              split.current
-                ? <>{split.current.contractType} <span className="font-mono text-muted-foreground text-[11px]">v{split.current.version}</span></>
+              currentContract
+                ? <>{currentContract.contractType} <span className="font-mono text-muted-foreground text-[11px]">v{currentContract.version}</span></>
                 : <span className="text-muted-foreground">None active</span>
             }
-            hint={split.current ? `${formatDate(split.current.startDate)} → ${formatDate(split.current.endDate)}` : 'No contract window covers today'}
+            hint={currentContract ? `${formatDate(currentContract.startDate)} → ${formatDate(currentContract.endDate)}` : 'No contract window covers today'}
           />
-          <FormRow label="Future contracts" value={split.future.length} />
+          {currentContract ? (
+            <FormRow
+              label="Days to expiry"
+              value={
+                daysToExpiry == null
+                  ? <span className="text-muted-foreground">—</span>
+                  : daysToExpiry < 0
+                    ? <Chip tone="expired">{Math.abs(daysToExpiry)} day(s) past</Chip>
+                    : daysToExpiry <= 30
+                      ? <Chip tone="expiring">{daysToExpiry} days</Chip>
+                      : <Chip tone="active">{daysToExpiry} days</Chip>
+              }
+            />
+          ) : null}
+          <FormRow
+            label="Basic salary"
+            value={
+              currentContract?.basicSalary != null
+                ? <span className="tabular-nums font-medium">{currentContract.basicSalary.toLocaleString()} {currentContract.currency ?? 'SAR'}</span>
+                : <span className="text-muted-foreground">—</span>
+            }
+          />
+          <FormRow
+            label="Monthly package"
+            value={
+              currentCompensation && currentCompensation.monthlyTotal > 0
+                ? <span className="tabular-nums font-semibold">{currentCompensation.monthlyTotal.toLocaleString()} {currentCompensation.currency}</span>
+                : currentContract?.totalSalary != null
+                  ? <span className="tabular-nums font-semibold">{currentContract.totalSalary.toLocaleString()} {currentContract.currency ?? 'SAR'}</span>
+                  : <span className="text-muted-foreground">—</span>
+            }
+            hint={
+              currentCompensation && currentCompensation.lines.length > 0
+                ? `${currentCompensation.lines.length} component${currentCompensation.lines.length === 1 ? '' : 's'} from current contract`
+                : undefined
+            }
+          />
           <FormRow label="History"          value={split.history.length} hint="Expired / superseded — kept as record" />
           <FormRow
             label="Review required"
@@ -702,13 +758,97 @@ function TransactionsSection({ rows }: { rows: EmployeeTransaction[] }) {
   );
 }
 
-function PayrollSection({ lines, canWrite, onAdd }: { lines: EmployeeCompensationLine[]; canWrite: boolean; onAdd: () => void }) {
-  const totalMonthly = lines
+/**
+ * Phase 11 — Compensation panel.
+ *
+ * Splits the raw `employee_compensation_lines` into four bands:
+ *   - Basic           (component_code === 'PAY_BASIC')
+ *   - Housing         (PAY_HOUSING)
+ *   - Transportation  (PAY_TRANSPORT)
+ *   - Other           (everything else; food / role / one-off / etc.)
+ *
+ * Filters out lines whose effective window is fully in the past so the
+ * "Current" view doesn't pollute with retired components. Old comp lines
+ * are NOT deleted — they live in the contract history; the panel just
+ * doesn't display them here.
+ *
+ * Each line carries its `sourceContractId` set by the commit pipeline.
+ * We resolve the contract version from the `contracts` array passed in
+ * (the same one the Contracts tab uses) so the row label can read
+ * "Basic salary · from contract v3 (PERMANENT)".
+ */
+function PayrollSection({
+  lines, contracts, canWrite, onAdd,
+}: {
+  lines: EmployeeCompensationLine[];
+  contracts: Contract[];
+  canWrite: boolean;
+  onAdd: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  // "Current" = monthly lines whose effective window covers today (or has
+  // no end date yet). Yearly / one-time lines are shown separately.
+  const current = lines.filter((l) => {
+    if (l.effectiveFrom > today) return false;
+    if (l.effectiveTo && l.effectiveTo < today) return false;
+    return true;
+  });
+
+  // Index contracts by id so we can resolve `sourceContractId -> v{n}`.
+  const contractById = new Map(contracts.map((c) => [c.id, c]));
+
+  function band(line: EmployeeCompensationLine): 'basic' | 'housing' | 'transport' | 'other' {
+    switch (line.componentCode) {
+      case 'PAY_BASIC':     return 'basic';
+      case 'PAY_HOUSING':   return 'housing';
+      case 'PAY_TRANSPORT': return 'transport';
+      default:              return 'other';
+    }
+  }
+
+  const grouped = {
+    basic:     current.filter((l) => band(l) === 'basic'),
+    housing:   current.filter((l) => band(l) === 'housing'),
+    transport: current.filter((l) => band(l) === 'transport'),
+    other:     current.filter((l) => band(l) === 'other'),
+  };
+  // Sum only monthly lines; yearly/one_time shown but excluded from the
+  // running monthly subtotal so the "Monthly package" isn't misleading.
+  const monthlyTotal = current
     .filter((l) => l.frequency === 'monthly')
     .reduce((s, l) => s + l.amount, 0);
+  const annualTotal  = monthlyTotal * 12 + current
+    .filter((l) => l.frequency === 'yearly')
+    .reduce((s, l) => s + l.amount, 0);
+  const currency = current[0]?.currency ?? 'SAR';
+
+  if (current.length === 0) {
+    return (
+      <Panel
+        title="Compensation"
+        action={
+          canWrite ? (
+            <AliveButton variant="primary" size="xs" icon={<Plus className="h-3.5 w-3.5" />} onClick={onAdd}>
+              Add line
+            </AliveButton>
+          ) : undefined
+        }
+      >
+        <EmptyState
+          icon={Wallet}
+          tone="info"
+          title="No active compensation lines"
+          description={canWrite
+            ? 'Import a contract or add a line manually. Contract imports populate basic / housing / transport automatically.'
+            : 'Admin can add components from the profile actions.'}
+        />
+      </Panel>
+    );
+  }
+
   return (
     <Panel
-      title="Payroll / Compensation"
+      title="Compensation"
       action={
         canWrite ? (
           <AliveButton variant="primary" size="xs" icon={<Plus className="h-3.5 w-3.5" />} onClick={onAdd}>
@@ -717,44 +857,113 @@ function PayrollSection({ lines, canWrite, onAdd }: { lines: EmployeeCompensatio
         ) : undefined
       }
     >
-      {lines.length === 0 ? (
-        <EmptyState
-          icon={Wallet}
-          tone="info"
-          title="No compensation lines yet"
-          description={canWrite
-            ? 'Add a basic salary, allowance, or deduction to get started.'
-            : 'Admin can add components from the profile actions.'}
-        />
-      ) : (
-        <div>
-          <ul className="divide-y">
-            {lines.map((l) => (
-              <li key={l.id} className="flex items-center gap-3 py-2.5">
-                <Wallet className="h-4 w-4 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium">{l.componentName}</div>
-                  <div className="text-[11px] text-muted-foreground tabular-nums">
-                    <span className="font-mono">{l.componentCode}</span> · effective {l.effectiveFrom}
-                    {l.effectiveTo ? ` → ${l.effectiveTo}` : ' →'}
-                  </div>
-                </div>
-                <div className="text-right tabular-nums">
-                  <div className="text-[13px] font-semibold">{l.currency} {l.amount.toLocaleString()}</div>
-                  <div className="text-[10.5px] text-muted-foreground uppercase tracking-wide">{l.frequency.replace('_', ' ')}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-          {totalMonthly > 0 && (
-            <div className="mt-2 pt-2 border-t flex justify-between text-[12px] font-medium">
-              <span className="text-muted-foreground">Monthly total</span>
-              <span className="tabular-nums">SAR {totalMonthly.toLocaleString()}</span>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Totals strip — currency stays explicit so the user knows what
+          we're summing; mixed-currency rows would show the first one's
+          currency but we don't combine across currencies anywhere. */}
+      <div className="mb-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-[12px]">
+        <TotalsTile label="Monthly total"  value={monthlyTotal} currency={currency} emphasis />
+        <TotalsTile label="Annualized"     value={annualTotal}  currency={currency} />
+        <TotalsTile label="Components"     value={current.length} currency={null} />
+        <TotalsTile label="As of"          value={today}        currency={null} />
+      </div>
+
+      <CompBand title="Basic salary"            tone="active"  lines={grouped.basic}     contractById={contractById} />
+      <CompBand title="Housing allowance"       tone="info"    lines={grouped.housing}   contractById={contractById} />
+      <CompBand title="Transportation"          tone="info"    lines={grouped.transport} contractById={contractById} />
+      <CompBand title="Other allowances"        tone="default" lines={grouped.other}     contractById={contractById} />
     </Panel>
+  );
+}
+
+function TotalsTile({
+  label, value, currency, emphasis,
+}: {
+  label: string;
+  value: number | string;
+  currency: string | null;
+  emphasis?: boolean;
+}) {
+  const display = typeof value === 'number' ? value.toLocaleString() : value;
+  return (
+    <div className={cn(
+      'rounded-md border px-3 py-2',
+      emphasis ? 'bg-primary/5 border-primary/20' : 'bg-muted/30',
+    )}>
+      <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground font-medium">{label}</div>
+      <div className={cn('mt-0.5 tabular-nums', emphasis ? 'text-[16px] font-semibold' : 'text-[13px] font-medium')}>
+        {display}{currency ? <span className="ml-1 text-[10.5px] text-muted-foreground font-normal">{currency}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function CompBand({
+  title, tone, lines, contractById,
+}: {
+  title: string;
+  tone: 'active' | 'info' | 'default';
+  lines: EmployeeCompensationLine[];
+  contractById: Map<string, Contract>;
+}) {
+  if (lines.length === 0) {
+    return (
+      <div className="mb-3 last:mb-0">
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium mb-1.5">
+          {title}
+        </div>
+        <div className="text-[12px] text-muted-foreground italic">Not configured</div>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="text-[11px] uppercase tracking-wide text-muted-foreground font-medium">
+          {title}
+        </div>
+        <Chip tone={tone}>{lines.length} {lines.length === 1 ? 'line' : 'lines'}</Chip>
+      </div>
+      <ul className="border rounded-md divide-y">
+        {lines.map((l) => {
+          // `sourceContractId` lives on the line when the import commit
+          // pipeline wrote it. The Contract.version + Contract.contractType
+          // come from the contracts array passed in by the page.
+          const src = l.sourceContractId ? contractById.get(l.sourceContractId) : null;
+          return (
+            <li key={l.id} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/30 transition-colors duration-fast">
+              <Wallet className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium">{l.componentName}</div>
+                <div className="text-[11px] text-muted-foreground tabular-nums">
+                  <span className="font-mono">{l.componentCode}</span>
+                  {' · effective '}{formatDate(l.effectiveFrom)}
+                  {l.effectiveTo ? ` → ${formatDate(l.effectiveTo)}` : ' → open'}
+                  {src ? (
+                    <>
+                      {' · '}
+                      <span className="font-medium text-foreground/70">
+                        contract <span className="font-mono">v{src.version}</span> ({src.contractType})
+                      </span>
+                    </>
+                  ) : l.source === 'manual' ? (
+                    <> · <span className="text-muted-foreground/80">manual entry</span></>
+                  ) : null}
+                  {l.notes ? <> · <span className="italic">{l.notes}</span></> : null}
+                </div>
+              </div>
+              <div className="text-right tabular-nums">
+                <div className="text-[13px] font-semibold">
+                  {l.amount.toLocaleString()} <span className="text-[10.5px] text-muted-foreground font-normal">{l.currency}</span>
+                </div>
+                <div className="text-[10.5px] text-muted-foreground uppercase tracking-wide">
+                  {l.frequency.replace('_', ' ')}
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

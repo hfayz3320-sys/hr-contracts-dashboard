@@ -29,14 +29,17 @@ describe('admin route tree (Phase 8)', () => {
     expect((admin?.children ?? []).length).toBeGreaterThan(0);
   });
 
-  it('declares all six admin sub-routes', () => {
+  it('declares all admin sub-routes', () => {
     const admin = findAdminNode();
     const childPaths = (admin?.children ?? []).map((c) => c.path ?? (c.index ? '<index>' : ''));
-    // Index route (dashboard) + 6 named sub-routes.
+    // Index route (dashboard) + named sub-routes. Phase 11 adds the two
+    // import-review routes (list + per-job).
     expect(childPaths).toEqual(
       expect.arrayContaining([
         '<index>',
         'import',
+        'import-review',
+        'import-review/:jobId',
         'review',
         'import-history',
         'users',
@@ -44,7 +47,7 @@ describe('admin route tree (Phase 8)', () => {
         'data-quality',
       ]),
     );
-    expect(childPaths.length).toBe(7);
+    expect(childPaths.length).toBe(9);
   });
 
   it('keeps legacy routes /imports, /review, /users, /admin top-level mountable', () => {
@@ -62,6 +65,7 @@ describe('admin route tree (Phase 8)', () => {
     // import the same paths.
     expect(routes.admin).toBe('/admin');
     expect(routes.adminImport).toBe('/admin/import');
+    expect(routes.adminImportReview).toBe('/admin/import-review');
     expect(routes.adminReview).toBe('/admin/review');
     expect(routes.adminImportHistory).toBe('/admin/import-history');
     expect(routes.adminUsers).toBe('/admin/users');

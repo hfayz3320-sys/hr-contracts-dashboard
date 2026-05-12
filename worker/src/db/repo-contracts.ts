@@ -18,6 +18,15 @@ type ContractRow = {
   extraction_confidence: number | null;
   notes: string | null;
   created_at: string;
+  // Phase 11 — salary breakdown columns added by migration 0009. Optional
+  // on the row type so pre-migration databases (where the columns don't
+  // exist) still type-check.
+  basic_salary?: number | null;
+  housing_allowance?: number | null;
+  transport_allowance?: number | null;
+  other_allowances_json?: string | null;
+  total_salary?: number | null;
+  currency?: string | null;
 };
 
 /**
@@ -38,6 +47,24 @@ function rowToContract(r: ContractRow): Contract {
     startDate: r.start_date,
     endDate: r.end_date,
   });
+  // Phase 11 — parse the JSON-encoded allowances array if present. Errors
+  // are swallowed: an unparseable blob (manual SQL hack, schema drift)
+  // just yields `otherAllowances` = []; the source row stays for audit.
+  let otherAllowances: { code: string; name: string; amount: number }[] | undefined;
+  if (typeof r.other_allowances_json === 'string' && r.other_allowances_json.length > 0) {
+    try {
+      const parsed = JSON.parse(r.other_allowances_json) as unknown;
+      if (Array.isArray(parsed)) {
+        otherAllowances = parsed.filter(
+          (x): x is { code: string; name: string; amount: number } =>
+            typeof x === 'object' && x != null &&
+            typeof (x as { code?: unknown }).code === 'string' &&
+            typeof (x as { name?: unknown }).name === 'string' &&
+            typeof (x as { amount?: unknown }).amount === 'number',
+        );
+      }
+    } catch { /* ignore */ }
+  }
   return {
     id: r.id,
     employeeId: r.employee_id,
@@ -52,6 +79,12 @@ function rowToContract(r: ContractRow): Contract {
     filename: r.filename,
     ...(r.extraction_confidence != null ? { extractionConfidence: r.extraction_confidence } : {}),
     ...(r.notes != null ? { notes: r.notes } : {}),
+    ...(r.basic_salary != null ? { basicSalary: r.basic_salary } : {}),
+    ...(r.housing_allowance != null ? { housingAllowance: r.housing_allowance } : {}),
+    ...(r.transport_allowance != null ? { transportAllowance: r.transport_allowance } : {}),
+    ...(otherAllowances && otherAllowances.length > 0 ? { otherAllowances } : {}),
+    ...(r.total_salary != null ? { totalSalary: r.total_salary } : {}),
+    ...(r.currency != null ? { currency: r.currency } : {}),
     createdAt: r.created_at,
     ...(dataQualityIssue != null ? { dataQualityIssue } : {}),
   };
@@ -131,6 +164,13 @@ export type ContractUpsertInput = {
   notes?: string | null;
   /** Source-traceability — every contract row must point to a source_files entry. */
   sourceFileId: string;
+  // Phase 11 — salary breakdown from the source PDF.
+  basicSalary?: number | null;
+  housingAllowance?: number | null;
+  transportAllowance?: number | null;
+  otherAllowances?: { code: string; name: string; amount: number }[] | null;
+  totalSalary?: number | null;
+  currency?: string | null;
 };
 
 export async function insertContract(
@@ -149,31 +189,76 @@ export async function insertContract(
   const nextVersion = (prev?.version ?? 0) + 1;
   const versionOf = prev?.id ?? null;
 
-  await env.DB
-    .prepare(
-      `INSERT OR IGNORE INTO contracts
-       (id, employee_id, identity_number, contract_type, start_date, end_date,
-        status, version, version_of, file_hash, filename, extraction_confidence,
-        notes, source_file_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id,
-      input.employeeId,
-      input.identityNumber,
-      input.contractType,
-      input.startDate,
-      input.endDate,
-      input.status,
-      nextVersion,
-      versionOf,
-      input.fileHash,
-      input.filename,
-      input.extractionConfidence ?? null,
-      input.notes ?? null,
-      input.sourceFileId,
-    )
-    .run();
+  // Phase 11 — try the wide INSERT (with salary columns from migration
+  // 0009) first; fall back to the legacy column set if the columns
+  // aren't on this database yet. Same "no such column" pattern as
+  // insertEmployee above.
+  const otherAllowancesJson = input.otherAllowances && input.otherAllowances.length > 0
+    ? JSON.stringify(input.otherAllowances)
+    : null;
+  try {
+    await env.DB
+      .prepare(
+        `INSERT OR IGNORE INTO contracts
+         (id, employee_id, identity_number, contract_type, start_date, end_date,
+          status, version, version_of, file_hash, filename, extraction_confidence,
+          notes, source_file_id,
+          basic_salary, housing_allowance, transport_allowance,
+          other_allowances_json, total_salary, currency)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        input.employeeId,
+        input.identityNumber,
+        input.contractType,
+        input.startDate,
+        input.endDate,
+        input.status,
+        nextVersion,
+        versionOf,
+        input.fileHash,
+        input.filename,
+        input.extractionConfidence ?? null,
+        input.notes ?? null,
+        input.sourceFileId,
+        input.basicSalary ?? null,
+        input.housingAllowance ?? null,
+        input.transportAllowance ?? null,
+        otherAllowancesJson,
+        input.totalSalary ?? null,
+        input.currency ?? 'SAR',
+      )
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/no such column/i.test(msg)) throw err;
+    await env.DB
+      .prepare(
+        `INSERT OR IGNORE INTO contracts
+         (id, employee_id, identity_number, contract_type, start_date, end_date,
+          status, version, version_of, file_hash, filename, extraction_confidence,
+          notes, source_file_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        input.employeeId,
+        input.identityNumber,
+        input.contractType,
+        input.startDate,
+        input.endDate,
+        input.status,
+        nextVersion,
+        versionOf,
+        input.fileHash,
+        input.filename,
+        input.extractionConfidence ?? null,
+        input.notes ?? null,
+        input.sourceFileId,
+      )
+      .run();
+  }
 
   await env.DB
     .prepare(

@@ -17,6 +17,7 @@ import { HrErpDesignLab } from '@/pages/design-lab/hr-erp';
 import { AdminGuard } from '@/components/common/AdminGuard';
 import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
 import { AdminImportPage } from '@/pages/admin/AdminImportPage';
+import { AdminImportReviewPage } from '@/pages/admin/AdminImportReviewPage';
 import { AdminConfigPage } from '@/pages/admin/AdminConfigPage';
 import { AdminDataQualityPage } from '@/pages/admin/AdminDataQualityPage';
 import { routes } from '@/lib/routes';
@@ -57,6 +58,8 @@ export const routeTree: RouteObject[] = [
         children: [
           { index: true,            element: <AdminDashboardPage /> },
           { path: 'import',         element: <AdminImportPage /> },
+          { path: 'import-review',          element: <AdminImportReviewPage /> },
+          { path: 'import-review/:jobId',   element: <AdminImportReviewPage /> },
           { path: 'review',         element: <ReviewQueuePage /> },
           { path: 'import-history', element: <AdminPage /> },
           { path: 'users',          element: <UsersPage /> },

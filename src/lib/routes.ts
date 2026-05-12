@@ -13,6 +13,7 @@ export const routes = {
   // hr_manager only). Legacy /imports, /review, /users keep working for
   // backward compatibility; nav points at the /admin/* variants.
   adminImport: '/admin/import',
+  adminImportReview: '/admin/import-review',
   adminReview: '/admin/review',
   adminImportHistory: '/admin/import-history',
   adminUsers: '/admin/users',

@@ -21,6 +21,8 @@ import type {
   EmployeeCompensationCreateRequest,
   EmployeeLearningCreateRequest,
   EmployeeTransactionCreateRequest,
+  EmployeeManualCreateRequest,
+  ImportJobItemPatchRequest,
 } from '@shared/api-contract';
 
 export const queryKeys = {
@@ -388,5 +390,31 @@ export function useCreateEmployeeTransaction(employeeId: string) {
     mutationFn: (payload: EmployeeTransactionCreateRequest) =>
       api.createEmployeeTransaction(employeeId, payload),
     onSuccess: () => invalidate(),
+  });
+}
+
+// ============================================================================
+// Phase 11 — manual employee create + import-item review edit.
+// ============================================================================
+
+export function useCreateEmployeeManual() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: EmployeeManualCreateRequest) => api.createEmployeeManual(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.employees });
+    },
+  });
+}
+
+export function usePatchImportJobItem(jobId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { itemId: string; payload: ImportJobItemPatchRequest }) =>
+      api.patchImportJobItem(jobId, args.itemId, args.payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.importJobItems(jobId) });
+      qc.invalidateQueries({ queryKey: queryKeys.importJob(jobId) });
+    },
   });
 }

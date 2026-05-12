@@ -15,6 +15,10 @@ type EmployeeRow = {
   nationality: string | null;
   date_of_birth: string | null;
   hire_date: string | null;
+  // Phase 11: added by migration 0009. Optional in the row type so pre-
+  // migration databases (where the columns don't exist) still type-check.
+  mobile?: string | null;
+  notes?: string | null;
   status: EmployeeStatus;
   created_at: string;
   updated_at: string;
@@ -39,6 +43,8 @@ function rowToEmployee(r: EmployeeRow, history: EmployeeNumberHistoryEntry[]): E
     ...(r.nationality != null ? { nationality: r.nationality } : {}),
     ...(r.date_of_birth != null ? { dateOfBirth: r.date_of_birth } : {}),
     ...(r.hire_date != null ? { hireDate: r.hire_date } : {}),
+    ...(r.mobile != null ? { mobile: r.mobile } : {}),
+    ...(r.notes != null ? { notes: r.notes } : {}),
     status: r.status,
     sourceFiles: [],
     createdAt: r.created_at,
@@ -90,6 +96,9 @@ export type EmployeeUpsertInput = {
   nationality?: string | null;
   dateOfBirth?: string | null;
   hireDate?: string | null;
+  // Phase 11 — manual-create form fields.
+  mobile?: string | null;
+  notes?: string | null;
   status?: EmployeeStatus;
   /** Source-traceability — required for any production-committed row. */
   sourceFileId: string;
@@ -100,27 +109,59 @@ export async function insertEmployee(
   id: string,
   input: EmployeeUpsertInput,
 ): Promise<string> {
-  await env.DB
-    .prepare(
-      `INSERT OR IGNORE INTO employees
-       (id, identity_number, full_name, full_name_arabic, department, job_title,
-        nationality, date_of_birth, hire_date, status, source_file_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id,
-      input.identityNumber,
-      input.fullName,
-      input.fullNameArabic ?? null,
-      input.department ?? null,
-      input.jobTitle ?? null,
-      input.nationality ?? null,
-      input.dateOfBirth ?? null,
-      input.hireDate ?? null,
-      input.status ?? 'active',
-      input.sourceFileId,
-    )
-    .run();
+  // Phase 11 — the `mobile` / `notes` columns land via migration 0009.
+  // Try the full insert first; if the database is pre-0009, fall back to
+  // the legacy column set so older deployments keep working until the
+  // migration is applied.
+  try {
+    await env.DB
+      .prepare(
+        `INSERT OR IGNORE INTO employees
+         (id, identity_number, full_name, full_name_arabic, department, job_title,
+          nationality, date_of_birth, hire_date, mobile, notes, status, source_file_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        input.identityNumber,
+        input.fullName,
+        input.fullNameArabic ?? null,
+        input.department ?? null,
+        input.jobTitle ?? null,
+        input.nationality ?? null,
+        input.dateOfBirth ?? null,
+        input.hireDate ?? null,
+        input.mobile ?? null,
+        input.notes ?? null,
+        input.status ?? 'active',
+        input.sourceFileId,
+      )
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/no such column/i.test(msg)) throw err;
+    await env.DB
+      .prepare(
+        `INSERT OR IGNORE INTO employees
+         (id, identity_number, full_name, full_name_arabic, department, job_title,
+          nationality, date_of_birth, hire_date, status, source_file_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        input.identityNumber,
+        input.fullName,
+        input.fullNameArabic ?? null,
+        input.department ?? null,
+        input.jobTitle ?? null,
+        input.nationality ?? null,
+        input.dateOfBirth ?? null,
+        input.hireDate ?? null,
+        input.status ?? 'active',
+        input.sourceFileId,
+      )
+      .run();
+  }
   const existing = await findEmployeeByIdentity(env, input.identityNumber);
   return existing?.id ?? id;
 }
@@ -139,6 +180,8 @@ export async function updateEmployeeFields(
   if (input.nationality !== undefined) { sets.push('nationality = ?'); binds.push(input.nationality); }
   if (input.dateOfBirth !== undefined) { sets.push('date_of_birth = ?'); binds.push(input.dateOfBirth); }
   if (input.hireDate !== undefined) { sets.push('hire_date = ?'); binds.push(input.hireDate); }
+  if (input.mobile !== undefined) { sets.push('mobile = ?'); binds.push(input.mobile); }
+  if (input.notes !== undefined) { sets.push('notes = ?'); binds.push(input.notes); }
   if (input.status !== undefined) { sets.push('status = ?'); binds.push(input.status); }
   if (input.sourceFileId !== undefined) { sets.push('source_file_id = ?'); binds.push(input.sourceFileId); }
   if (sets.length === 0) return;

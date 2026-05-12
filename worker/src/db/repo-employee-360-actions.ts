@@ -250,6 +250,9 @@ interface CompensationRow {
   frequency: EmployeeCompensationLine['frequency'];
   effective_from: string;
   effective_to: string | null;
+  // Phase 11 — added by migration 0009. Optional in the row type so
+  // pre-migration databases still type-check.
+  source_contract_id?: string | null;
   source: EmployeeCompensationLine['source'];
   notes: string | null;
   created_by: string;
@@ -270,6 +273,7 @@ function rowToCompensation(r: CompensationRow): EmployeeCompensationLine {
     effectiveFrom: r.effective_from,
     ...(r.effective_to != null ? { effectiveTo: r.effective_to } : {}),
     source: r.source,
+    ...(r.source_contract_id != null ? { sourceContractId: r.source_contract_id } : {}),
     ...(r.notes != null ? { notes: r.notes } : {}),
     createdBy: r.created_by,
     createdAt: r.created_at,
@@ -300,28 +304,111 @@ export async function insertCompensationLine(
     effectiveTo?: string | null;
     notes?: string | null;
     actor: string;
+    // Phase 11 — when the line is derived from a committed contract,
+    // record the contract id + flip the `source` column to 'contract'
+    // so the profile UI can show "from contract v3 (id ctr-…)".
+    source?: EmployeeCompensationLine['source'];
+    sourceContractId?: string | null;
   },
 ): Promise<EmployeeCompensationLine> {
-  await env.DB
-    .prepare(
-      `INSERT INTO employee_compensation_lines
-         (id, employee_id, component_code, component_name, amount, currency,
-          frequency, effective_from, effective_to, source, notes,
-          created_by, created_at, updated_at, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?, datetime('now'), datetime('now'), ?)`,
-    )
-    .bind(
-      id, input.employeeId, input.componentCode, input.componentName,
-      input.amount, input.currency, input.frequency, input.effectiveFrom,
-      input.effectiveTo ?? null, input.notes ?? null, input.actor, input.actor,
-    )
-    .run();
+  const source = input.source ?? 'manual';
+  // Migration 0009 adds `source_contract_id`. Wide INSERT first; fall
+  // back to the pre-0009 column set if needed.
+  try {
+    await env.DB
+      .prepare(
+        `INSERT INTO employee_compensation_lines
+           (id, employee_id, component_code, component_name, amount, currency,
+            frequency, effective_from, effective_to, source, notes,
+            created_by, created_at, updated_at, updated_by, source_contract_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?)`,
+      )
+      .bind(
+        id, input.employeeId, input.componentCode, input.componentName,
+        input.amount, input.currency, input.frequency, input.effectiveFrom,
+        input.effectiveTo ?? null, source, input.notes ?? null, input.actor, input.actor,
+        input.sourceContractId ?? null,
+      )
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/no such column/i.test(msg)) throw err;
+    await env.DB
+      .prepare(
+        `INSERT INTO employee_compensation_lines
+           (id, employee_id, component_code, component_name, amount, currency,
+            frequency, effective_from, effective_to, source, notes,
+            created_by, created_at, updated_at, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?)`,
+      )
+      .bind(
+        id, input.employeeId, input.componentCode, input.componentName,
+        input.amount, input.currency, input.frequency, input.effectiveFrom,
+        input.effectiveTo ?? null, source, input.notes ?? null, input.actor, input.actor,
+      )
+      .run();
+  }
   const r = await env.DB
     .prepare(`SELECT * FROM employee_compensation_lines WHERE id = ?`)
     .bind(id)
     .first<CompensationRow>();
   if (!r) throw new Error(`Inserted compensation ${id} not found`);
   return rowToCompensation(r);
+}
+
+/**
+ * Phase 11 — write the basic/housing/transport/other compensation lines
+ * derived from a committed contract. Called from the import commit pipeline
+ * (`applyContract`). Idempotent at the line level via the unique
+ * `(employee_id, component_code, source_contract_id)` combination — a
+ * re-commit of the same contract overwrites the prior lines instead of
+ * doubling them.
+ */
+export async function replaceCompensationLinesForContract(
+  env: Env,
+  args: {
+    employeeId: string;
+    contractId: string;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    currency: string;
+    actor: string;
+    components: { code: string; name: string; amount: number }[];
+  },
+): Promise<void> {
+  if (args.components.length === 0) return;
+  // Delete any prior lines for this contract first so a re-commit (with
+  // edited values) replaces, not duplicates.
+  try {
+    await env.DB
+      .prepare(`DELETE FROM employee_compensation_lines WHERE source_contract_id = ?`)
+      .bind(args.contractId)
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Pre-0009 databases don't have the column. Skip the delete — the
+    // worst case is that the user will see duplicated lines until they
+    // re-apply the migration; correctness is preserved.
+    if (!/no such column/i.test(msg)) throw err;
+  }
+  for (const c of args.components) {
+    if (!Number.isFinite(c.amount) || c.amount <= 0) continue;
+    const lineId = `cmp-${args.contractId}-${c.code}`;
+    await insertCompensationLine(env, lineId, {
+      employeeId: args.employeeId,
+      componentCode: c.code,
+      componentName: c.name,
+      amount: c.amount,
+      currency: args.currency,
+      frequency: 'monthly',
+      effectiveFrom: args.effectiveFrom,
+      effectiveTo: args.effectiveTo,
+      notes: null,
+      actor: args.actor,
+      source: 'contract',
+      sourceContractId: args.contractId,
+    });
+  }
 }
 
 // ===========================================================================

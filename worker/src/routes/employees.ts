@@ -5,6 +5,8 @@ import {
   listEmployees,
   updateEmployeeFields,
   setCurrentEmployeeNumber,
+  insertEmployee,
+  findEmployeeByIdentity,
 } from '../db/repo-employees';
 import { listContractsForEmployee } from '../db/repo-contracts';
 import { listInsuranceForEmployee } from '../db/repo-insurance';
@@ -21,12 +23,100 @@ import {
 import { computeEmployeeDataQuality } from '../lib/employee-data-quality';
 import { requireAuth, requireAdmin, getActorEmail } from '../lib/auth';
 import { writeAudit } from '../lib/audit';
-import { employeePatchRequest } from '@shared/api-contract';
+import { newId } from '../lib/id';
+import { employeePatchRequest, employeeManualCreateRequest } from '@shared/api-contract';
 
 export const employeeRoutes = new Hono<AppContext>();
 
 employeeRoutes.use('/api/employees', requireAuth);
 employeeRoutes.use('/api/employees/*', requireAuth);
+
+/**
+ * POST /api/employees/manual — admin-only manual create.
+ *
+ * Match-key contract:
+ *   - identityNumber is the only key. Lookup is exact.
+ *   - If an employee already exists for that identity, the response
+ *     returns `existing: true` plus the existing employee row. NO fields
+ *     are mutated; the UI's job is to redirect the user to the existing
+ *     profile instead of producing a duplicate.
+ *   - If no employee exists, a new row is inserted (with `source_file_id`
+ *     = sentinel "manual:<actor>" so the traceability column is never
+ *     null) and `existing: false` is returned. Audit row uses
+ *     `employee.manual_create`.
+ *
+ * EmployeeNumber stays history-only: the route appends to
+ * employee_number_history when `employeeNumber` is supplied. It is never
+ * stored on the employees row.
+ *
+ * Mounted BEFORE the `/:id` reads so the literal `/manual` path doesn't
+ * resolve to a 404 lookup for an employee named "manual".
+ */
+employeeRoutes.post('/api/employees/manual', requireAdmin, async (c) => {
+  const raw = await c.req.json().catch(() => null);
+  const parsed = employeeManualCreateRequest.safeParse(raw);
+  if (!parsed.success) {
+    return c.json(
+      { error: 'BAD_REQUEST', message: 'Invalid manual-create payload', issues: parsed.error.issues },
+      400,
+    );
+  }
+  const actor = (await getActorEmail(c)) ?? 'unknown';
+
+  const existing = await findEmployeeByIdentity(c.env, parsed.data.identityNumber);
+  if (existing) {
+    await writeAudit(c.env, {
+      actor,
+      action: 'employee.manual_create_blocked',
+      target: existing.id,
+      status: 'warning',
+      details: `identity ${parsed.data.identityNumber} already exists — returned existing employee`,
+    });
+    return c.json({ ok: true as const, existing: true as const, employee: existing });
+  }
+
+  // No existing match → insert. Use a sentinel `source_file_id` so the
+  // traceability column never carries a NULL for manually-created rows.
+  const sourceFileId = `manual:${actor}`;
+  const newEmployeeId = newId('emp');
+  await insertEmployee(c.env, newEmployeeId, {
+    identityNumber: parsed.data.identityNumber,
+    fullName:
+      parsed.data.fullName?.trim() ||
+      parsed.data.fullNameArabic?.trim() ||
+      parsed.data.identityNumber,
+    fullNameArabic: parsed.data.fullNameArabic ?? null,
+    jobTitle: parsed.data.jobTitle ?? null,
+    department: parsed.data.department ?? null,
+    nationality: parsed.data.nationality ?? null,
+    mobile: parsed.data.mobile ?? null,
+    notes: parsed.data.notes ?? null,
+    status: parsed.data.status ?? 'active',
+    sourceFileId,
+  });
+
+  if (parsed.data.employeeNumber) {
+    const today = new Date().toISOString().slice(0, 10);
+    await setCurrentEmployeeNumber(
+      c.env, newEmployeeId, parsed.data.employeeNumber, today, sourceFileId,
+    );
+  }
+
+  const created = await getEmployee(c.env, newEmployeeId);
+  if (!created) {
+    return c.json({ error: 'INTERNAL_ERROR', message: 'Insert succeeded but re-read failed' }, 500);
+  }
+  await writeAudit(c.env, {
+    actor,
+    action: 'employee.manual_create',
+    target: created.id,
+    status: 'ok',
+    details:
+      `Manually created employee ${created.id} (identity ${parsed.data.identityNumber})` +
+      (parsed.data.employeeNumber ? `, employeeNumber=${parsed.data.employeeNumber}` : ''),
+  });
+  return c.json({ ok: true as const, existing: false as const, employee: created });
+});
 
 employeeRoutes.get('/api/employees', async (c) => {
   const result = await listEmployees(c.env);
@@ -108,6 +198,38 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
     documents,
   });
 
+  // Phase 11 — derive the "current contract" + current compensation total
+  // at READ TIME. Old contracts stay as history; we don't destroy or
+  // overwrite anything. The "current" contract is the one whose window
+  // covers today, picked by latest end_date.
+  const today = new Date().toISOString().slice(0, 10);
+  const currentContract = pickCurrentContract(contracts, today);
+  let currentCompensation: {
+    currency: string;
+    monthlyTotal: number;
+    sourceContractId: string | null;
+    lines: typeof compensation;
+  } | null = null;
+  if (compensation.length > 0) {
+    const linesForCurrent = currentContract
+      ? compensation.filter((l) => l.sourceContractId === currentContract.id)
+      : [];
+    const lines = linesForCurrent.length > 0
+      ? linesForCurrent
+      : compensation.filter((l) => l.frequency === 'monthly' &&
+          (!l.effectiveTo || l.effectiveTo >= today));
+    const monthlyTotal = lines
+      .filter((l) => l.frequency === 'monthly')
+      .reduce((s, l) => s + l.amount, 0);
+    const currency = lines[0]?.currency ?? 'SAR';
+    currentCompensation = {
+      currency,
+      monthlyTotal,
+      sourceContractId: currentContract?.id ?? null,
+      lines,
+    };
+  }
+
   return c.json({
     employee,
     contracts,
@@ -124,8 +246,32 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
     // The app_users row linked to this employee, or null. Read by the
     // profile to show "Login: alice@example.com (hr_manager)" when set.
     linkedUser,
+    // Phase 11 — derived view of "what is the current contract / salary"
+    // so the FE summary card doesn't have to re-implement the lifecycle
+    // rules.
+    currentContract,
+    currentCompensation,
   });
 });
+
+/**
+ * Pick the contract whose window covers `today`, preferring the latest
+ * end date. Mirrors the FE `splitContractsByLifecycle` "current" rule but
+ * computed server-side once. Returns null when no contract covers today.
+ */
+function pickCurrentContract<T extends { startDate: string; endDate: string }>(
+  contracts: T[],
+  today: string,
+): T | null {
+  let best: T | null = null;
+  for (const c of contracts) {
+    if (!c.startDate || !c.endDate) continue;
+    if (c.startDate <= today && c.endDate >= today) {
+      if (!best || c.endDate > best.endDate) best = c;
+    }
+  }
+  return best;
+}
 
 /**
  * PATCH /api/employees/:id — admin-only edit.

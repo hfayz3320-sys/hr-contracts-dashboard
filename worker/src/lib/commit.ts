@@ -45,6 +45,7 @@ import {
   insertContract,
   type ContractUpsertInput,
 } from '../db/repo-contracts';
+import { replaceCompensationLinesForContract } from '../db/repo-employee-360-actions';
 import {
   insertInsurance,
   updateInsuranceFields,
@@ -137,7 +138,7 @@ export async function commitImportJob(
         continue;
       }
 
-      const targetId = await applyRow(env, job.type, item, sourceFileId);
+      const targetId = await applyRow(env, job.type, item, sourceFileId, actor);
 
       if (item.resolvedAction === 'create') {
         counts.created++;
@@ -176,11 +177,34 @@ async function applyRow(
   jobType: 'employees' | 'contracts' | 'insurance',
   item: ImportJobItemRecord,
   sourceFileId: string,
+  actor: string,
 ): Promise<string> {
-  const row = item.rawPayload;
+  // Phase 11 — if the user edited extracted fields in the review screen,
+  // those edits live on `import_job_items.corrected_payload`. Merge them
+  // OVER the raw parser payload so the committed entity reflects the
+  // user's corrections. Raw payload stays for audit / debug.
+  const row = mergeCorrections(item.rawPayload, item.correctedPayload);
   if (jobType === 'employees') return await applyEmployee(env, row, item, sourceFileId);
-  if (jobType === 'contracts') return await applyContract(env, row, sourceFileId);
+  if (jobType === 'contracts') return await applyContract(env, row, sourceFileId, actor);
   return await applyInsurance(env, row, sourceFileId);
+}
+
+function mergeCorrections(
+  raw: Record<string, unknown>,
+  corrected: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!corrected || typeof corrected !== 'object') return raw;
+  // Shallow merge — values from `corrected` win, but `undefined` (i.e.
+  // "field not edited") falls through to the raw value. We intentionally
+  // do NOT recursively merge: nested arrays like `otherAllowances` are
+  // replaced wholesale when the user touches them so a deleted line
+  // really disappears.
+  const out: Record<string, unknown> = { ...raw };
+  for (const k of Object.keys(corrected)) {
+    const v = corrected[k];
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
 }
 
 async function applyEmployee(
@@ -229,11 +253,19 @@ async function applyContract(
   env: Env,
   row: Record<string, unknown>,
   sourceFileId: string,
+  actor: string,
 ): Promise<string> {
   const identity = strField(row, 'identityNumber') ?? strField(row, 'identity_number');
   if (!identity) throw new Error('missing identityNumber');
   const employee = await findEmployeeByIdentity(env, identity);
   if (!employee) throw new Error('employee not found for identity ' + identity);
+
+  const basicSalary       = numField(row, 'basicSalary')       ?? numField(row, 'basic_salary')       ?? null;
+  const housingAllowance  = numField(row, 'housingAllowance')  ?? numField(row, 'housing_allowance')  ?? null;
+  const transportAllowance= numField(row, 'transportAllowance')?? numField(row, 'transport_allowance')?? null;
+  const totalSalary       = numField(row, 'totalSalary')       ?? numField(row, 'total_salary')       ?? null;
+  const currency          = strField(row, 'currency') ?? 'SAR';
+  const otherAllowances   = arrayField(row, 'otherAllowances') ?? arrayField(row, 'other_allowances') ?? null;
 
   const input: ContractUpsertInput = {
     employeeId: employee.id,
@@ -248,11 +280,61 @@ async function applyContract(
       numField(row, 'extractionConfidence') ?? numField(row, 'extraction_confidence') ?? null,
     notes: strField(row, 'notes') ?? null,
     sourceFileId,
+    basicSalary,
+    housingAllowance,
+    transportAllowance,
+    otherAllowances: otherAllowances && otherAllowances.length > 0 ? otherAllowances : null,
+    totalSalary,
+    currency,
   };
   if (!input.startDate || !input.endDate || !input.fileHash) {
     throw new Error('missing required contract fields');
   }
-  return await insertContract(env, newId('ctr'), input);
+  const contractId = await insertContract(env, newId('ctr'), input);
+
+  // Phase 11 — populate employee_compensation_lines so the Profile's
+  // Compensation tab shows the contract's salary breakdown. The lines
+  // are linked back to this contract via source_contract_id so a re-
+  // commit replaces them rather than doubling. Effective window mirrors
+  // the contract's start/end dates.
+  const components: { code: string; name: string; amount: number }[] = [];
+  if (basicSalary && basicSalary > 0) {
+    components.push({ code: 'PAY_BASIC', name: 'Basic salary', amount: basicSalary });
+  }
+  if (housingAllowance && housingAllowance > 0) {
+    components.push({ code: 'PAY_HOUSING', name: 'Housing allowance', amount: housingAllowance });
+  }
+  if (transportAllowance && transportAllowance > 0) {
+    components.push({ code: 'PAY_TRANSPORT', name: 'Transportation allowance', amount: transportAllowance });
+  }
+  if (otherAllowances) {
+    for (const a of otherAllowances) {
+      if (Number.isFinite(a.amount) && a.amount > 0) {
+        components.push({ code: a.code, name: a.name, amount: a.amount });
+      }
+    }
+  }
+  if (components.length > 0) {
+    await replaceCompensationLinesForContract(env, {
+      employeeId: employee.id,
+      contractId,
+      effectiveFrom: input.startDate,
+      effectiveTo: input.endDate,
+      currency,
+      actor,
+      components,
+    });
+    await writeAudit(env, {
+      actor,
+      action: 'employee.compensation_updated',
+      target: employee.id,
+      status: 'ok',
+      details:
+        `Derived ${components.length} compensation line(s) from contract ${contractId}` +
+        ` (total=${totalSalary ?? components.reduce((s, c) => s + c.amount, 0)} ${currency})`,
+    });
+  }
+  return contractId;
 }
 
 async function applyInsurance(
@@ -369,5 +451,28 @@ function strField(row: Record<string, unknown>, key: string): string | undefined
 }
 function numField(row: Record<string, unknown>, key: string): number | undefined {
   const v = row[key];
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+function arrayField(
+  row: Record<string, unknown>,
+  key: string,
+): { code: string; name: string; amount: number }[] | undefined {
+  const v = row[key];
+  if (!Array.isArray(v)) return undefined;
+  const out: { code: string; name: string; amount: number }[] = [];
+  for (const e of v) {
+    if (typeof e !== 'object' || e == null) continue;
+    const code = (e as { code?: unknown }).code;
+    const name = (e as { name?: unknown }).name;
+    const amount = (e as { amount?: unknown }).amount;
+    if (typeof code === 'string' && typeof name === 'string' && typeof amount === 'number') {
+      out.push({ code, name, amount });
+    }
+  }
+  return out;
 }

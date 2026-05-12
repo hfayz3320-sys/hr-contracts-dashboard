@@ -211,6 +211,10 @@ export type ImportJobItemRecord = {
   reason: string | null;
   diff: Record<string, { from: unknown; to: unknown }> | null;
   rawPayload: Record<string, unknown>;
+  // Phase 11 — user-supplied overrides from the import review screen.
+  // `null` = no edits, fall through to rawPayload. Migration 0009 adds
+  // the column.
+  correctedPayload: Record<string, unknown> | null;
   committedAction: string | null;
   committedAt: string | null;
   committedTargetId: string | null;
@@ -227,6 +231,9 @@ type RawJobItemRow = {
   reason: string | null;
   diff: string | null;
   raw_payload: string;
+  // Optional in the row type so pre-migration databases (where the
+  // column does not exist) still type-check.
+  corrected_payload?: string | null;
   committed_action: string | null;
   committed_at: string | null;
   committed_target_id: string | null;
@@ -253,11 +260,40 @@ function rowToJobItem(r: RawJobItemRow): ImportJobItemRecord {
     reason: r.reason,
     diff: parseJsonRecord<Record<string, { from: unknown; to: unknown }>>(r.diff),
     rawPayload: parseJsonRecord<Record<string, unknown>>(r.raw_payload) ?? {},
+    correctedPayload: parseJsonRecord<Record<string, unknown>>(r.corrected_payload ?? null),
     committedAction: r.committed_action,
     committedAt: r.committed_at,
     committedTargetId: r.committed_target_id,
     errorMessage: r.error_message,
   };
+}
+
+/**
+ * Phase 11 — write an admin-edited corrections JSON onto an
+ * `import_job_items.corrected_payload`. Pre-migration databases throw
+ * "no such column"; the route translates that into a 503 so the FE can
+ * tell the user "review-edit not available yet on this deployment".
+ */
+export async function updateImportJobItemCorrections(
+  env: Env,
+  itemId: string,
+  corrections: Record<string, unknown>,
+): Promise<void> {
+  await env.DB
+    .prepare(`UPDATE import_job_items SET corrected_payload = ? WHERE id = ?`)
+    .bind(JSON.stringify(corrections), itemId)
+    .run();
+}
+
+export async function getImportJobItem(
+  env: Env,
+  itemId: string,
+): Promise<ImportJobItemRecord | null> {
+  const r = await env.DB
+    .prepare(`SELECT * FROM import_job_items WHERE id = ?`)
+    .bind(itemId)
+    .first<RawJobItemRow>();
+  return r ? rowToJobItem(r) : null;
 }
 
 export async function listImportJobItems(env: Env, jobId: string): Promise<ImportJobItemRecord[]> {

@@ -229,6 +229,8 @@ export function EmployeeProfilePage() {
           {...(data.compensation ? { compensation: data.compensation } : {})}
           {...(data.learning ? { learning: data.learning } : {})}
           {...(data.linkedUser !== undefined ? { linkedUser: data.linkedUser } : {})}
+          {...(data.currentContract !== undefined ? { currentContract: data.currentContract } : {})}
+          {...(data.currentCompensation !== undefined ? { currentCompensation: data.currentCompensation } : {})}
         />
       </div>
     );

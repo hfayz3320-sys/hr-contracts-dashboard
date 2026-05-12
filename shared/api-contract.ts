@@ -51,6 +51,9 @@ export const employeeSchema = z.object({
   nationality: z.string().optional(),
   dateOfBirth: z.string().optional(),
   hireDate: z.string().optional(),
+  // Phase 11 — manual-create form fields. Both nullable.
+  mobile: z.string().optional(),
+  notes: z.string().optional(),
   status: employeeStatusSchema,
   sourceFiles: z.array(z.string()),
   createdAt: z.string(),
@@ -99,6 +102,15 @@ export const contractSchema = z.object({
   // health probe in /api/debug/counts instead.
   extractionConfidence: z.number().min(-0.001).max(1.001).optional(),
   notes: z.string().optional(),
+  // Phase 11 — salary breakdown extracted from the source PDF.
+  basicSalary: z.number().nullable().optional(),
+  housingAllowance: z.number().nullable().optional(),
+  transportAllowance: z.number().nullable().optional(),
+  otherAllowances: z
+    .array(z.object({ code: z.string(), name: z.string(), amount: z.number() }))
+    .optional(),
+  totalSalary: z.number().nullable().optional(),
+  currency: z.string().optional(),
   createdAt: z.string(),
   employeeSummary: employeeSummarySchema.nullable().optional(),
   linkStatus: linkStatusSchema.optional(),
@@ -261,6 +273,9 @@ export const importJobItemSchema = z.object({
   reason: z.string().nullable(),
   diff: z.record(z.object({ from: z.unknown(), to: z.unknown() })).nullable(),
   rawPayload: z.record(z.unknown()),
+  // Phase 11 — user edits from the review screen, merged over rawPayload
+  // at commit time. `null` means no edits yet.
+  correctedPayload: z.record(z.unknown()).nullable().optional(),
   committedAction: z.string().nullable(),
   committedAt: z.string().nullable(),
   committedTargetId: z.string().nullable(),
@@ -331,6 +346,30 @@ export const importCommitRequest = z.object({
   jobId: z.string().min(1),
 });
 
+/**
+ * Phase 11 — per-item correction edit before commit.
+ *
+ * The contract import wizard now stages every row in `import_job_items`,
+ * lets the admin edit extracted fields in the review screen, and only
+ * applies the corrected values on commit. The PATCH endpoint stores the
+ * full corrected row as a JSON object on `import_job_items.corrected_payload`.
+ *
+ * Free-form so the FE doesn't have to enumerate every contract field; the
+ * commit pipeline merges `corrected_payload` over `raw_payload`. The dry-
+ * run resolver is re-run on PATCH so the row's `resolved_action`/`reason`
+ * also reflect the edits (e.g. a missing identity that the user filled
+ * in changes the row from 'review' to 'create').
+ */
+export const importJobItemPatchRequest = z.object({
+  corrections: z.record(z.unknown()),
+});
+export const importJobItemPatchResponse = z.object({
+  ok: z.literal(true),
+  item: z.unknown(), // intentionally loose — see importJobItemSchema in the
+                     // existing response; reusing it would require a forward
+                     // declaration we don't want here.
+});
+
 export const importCommitResponse = z.object({
   jobId: z.string(),
   status: z.enum(['committed', 'failed']),
@@ -374,6 +413,39 @@ export const employeePatchRequest = z.object({
   dateOfBirth: z.string().nullable().optional(),
   hireDate: z.string().nullable().optional(),
   status: employeeStatusSchema.optional(),
+  // Phase 11 — manual-create form fields.
+  mobile: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+});
+
+/**
+ * Phase 11 — manual employee creation form.
+ *
+ * UPSERT behaviour on the server:
+ *   - `identityNumber` is the only matching key.
+ *   - If a row already exists for that identity, the response carries
+ *     `existing: true` plus the existing employee. The UI's role is to
+ *     redirect the user to the existing profile rather than creating a
+ *     duplicate; no field on the existing row is changed.
+ *   - If no row exists, a new one is inserted and `existing: false` is
+ *     returned. Audit row uses `employee.manual_create`.
+ */
+export const employeeManualCreateRequest = z.object({
+  identityNumber: z.string().min(5),
+  fullNameArabic: z.string().nullable().optional(),
+  fullName: z.string().nullable().optional(),
+  employeeNumber: z.string().nullable().optional(),
+  jobTitle: z.string().nullable().optional(),
+  department: z.string().nullable().optional(),
+  mobile: z.string().nullable().optional(),
+  nationality: z.string().nullable().optional(),
+  status: employeeStatusSchema.optional(),
+  notes: z.string().nullable().optional(),
+});
+export const employeeManualCreateResponse = z.object({
+  ok: z.literal(true),
+  existing: z.boolean(),
+  employee: employeeSchema,
 });
 export const employeePatchResponse = z.object({
   ok: z.literal(true),
@@ -970,6 +1042,10 @@ export const employeeCompensationLineSchema = z.object({
   effectiveFrom: z.string(),
   effectiveTo: z.string().nullable().optional(),
   source: employeeCompensationSourceSchema,
+  // Phase 11 — set by the import-commit pipeline when this line was
+  // derived from a contract row. Null/undefined for `source='manual'`
+  // and for pre-migration-0009 rows.
+  sourceContractId: z.string().nullable().optional(),
   notes: z.string().nullable().optional(),
   createdBy: z.string(),
   createdAt: z.string(),
@@ -1059,6 +1135,16 @@ export const employee360Response = z.object({
   // by the profile to show "Login: alice@example.com (hr_manager)" or
   // "No login" when nothing is linked.
   linkedUser: appUserSchema.nullable().optional(),
+  // Phase 11 — server-derived "current" view so the FE doesn't
+  // re-implement the lifecycle rules. Null when no contract covers today
+  // and no monthly comp line is in effect.
+  currentContract: contractSchema.nullable().optional(),
+  currentCompensation: z.object({
+    currency: z.string(),
+    monthlyTotal: z.number(),
+    sourceContractId: z.string().nullable(),
+    lines: z.array(employeeCompensationLineSchema),
+  }).nullable().optional(),
 });
 
 export type EmployeeDocument          = z.infer<typeof employeeDocumentSchema>;
@@ -1129,6 +1215,10 @@ export type AppUserPatchResponse    = z.infer<typeof appUserPatchResponse>;
 export type AppUserDeactivateRequest = z.infer<typeof appUserDeactivateRequest>;
 export type ReviewApproveRequest    = z.infer<typeof reviewApproveRequest>;
 export type ReviewRejectRequest     = z.infer<typeof reviewRejectRequest>;
+// Phase 11 — manual create + per-item correction.
+export type EmployeeManualCreateRequest  = z.infer<typeof employeeManualCreateRequest>;
+export type EmployeeManualCreateResponse = z.infer<typeof employeeManualCreateResponse>;
+export type ImportJobItemPatchRequest    = z.infer<typeof importJobItemPatchRequest>;
 
 // ============================================================================
 // Phase 6A — HR Configuration foundation schemas.
@@ -1479,6 +1569,14 @@ export const API_PATHS = {
   // `?download=1` returns Content-Disposition: attachment.
   employeeDocumentFile: (id: string, docId: string)   => `/api/employees/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/file`,
   contractFile:          (id: string)                 => `/api/contracts/${encodeURIComponent(id)}/file`,
+  // Phase 11 — pre-commit access to the raw source file by its SHA-256
+  // hash. Used by the import-review screen to open the original PDF
+  // before the contract row exists.
+  sourceFileBytes:       (hash: string)               => `/api/source-files/${encodeURIComponent(hash)}/file`,
+  // Phase 11 — manual employee creation + per-item review edit endpoints.
+  employeesManual:       '/api/employees/manual',
+  importJobItemPatch:    (jobId: string, itemId: string) =>
+    `/api/import-jobs/${encodeURIComponent(jobId)}/items/${encodeURIComponent(itemId)}`,
   employeeTransactions: (id: string)                  => `/api/employees/${encodeURIComponent(id)}/transactions`,
   employeeTransaction:  (id: string, txnId: string)   => `/api/employees/${encodeURIComponent(id)}/transactions/${encodeURIComponent(txnId)}`,
   // Phase 6A-1 — HR Configuration foundation.

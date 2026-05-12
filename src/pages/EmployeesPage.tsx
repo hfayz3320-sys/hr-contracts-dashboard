@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Pencil, RefreshCw, Download, Users, UserCheck, UserX, ShieldAlert } from 'lucide-react';
+import { Search, Pencil, RefreshCw, Download, Users, UserCheck, UserX, ShieldAlert, UserPlus } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,7 @@ import { employeeRoute } from '@/lib/routes';
 import { employeeColumns } from '@/features/employees/columns';
 import { EmployeeDrawer } from '@/features/employees/EmployeeDrawer';
 import { EmployeeFiltersDrawer } from '@/features/employees/EmployeeFilters';
+import { CreateEmployeeModal } from '@/features/employees/CreateEmployeeModal';
 import { CountCard } from '@/components/ui-foundation/CountCard';
 import { ApiErrorState } from '@/components/common/ApiErrorState';
 import {
@@ -70,6 +71,7 @@ export function EmployeesPage() {
   const [filters, setFilters] = useState<EmployeeFilterValues>(emptyEmployeeFilters);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [createOpen, setCreateOpen] = useState(false);
   const { data: me } = useMe();
   const isAdmin = me?.isAdmin === true;
   const patchEmployee = usePatchEmployee();
@@ -140,6 +142,17 @@ export function EmployeesPage() {
                 className="pl-9"
               />
             </div>
+            {isAdmin ? (
+              <Button
+                size="sm"
+                onClick={() => setCreateOpen(true)}
+                title="Manually add a worker by Iqama / identity"
+                className="gap-1.5"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+                Create worker
+              </Button>
+            ) : null}
             <FilterButton
               activeCount={countEmployeeFilters(filters)}
               onClick={() => setFiltersOpen(true)}
@@ -289,6 +302,8 @@ export function EmployeesPage() {
         onOpenChange={(o) => !o && closeDrawer()}
         employee={selected}
       />
+
+      <CreateEmployeeModal open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
 }

@@ -55,6 +55,9 @@ import {
   employeeLearningResponse,
   employeeDocumentUploadResponse,
   employeeTransactionResponse,
+  // Phase 11.
+  employeeManualCreateResponse,
+  importJobItemPatchResponse,
 } from '@shared/api-contract';
 import type { z } from 'zod';
 import type {
@@ -77,6 +80,8 @@ import type {
   employeeCompensationCreateRequest,
   employeeLearningCreateRequest,
   employeeTransactionCreateRequest,
+  employeeManualCreateRequest,
+  importJobItemPatchRequest,
 } from '@shared/api-contract';
 import { adminHeaders } from './admin';
 
@@ -522,6 +527,45 @@ export const api = {
   /**
    * Fetch an employee document file as a Blob (any type — PDF, image, doc).
    */
+  // Phase 11 — manual create + import-item correction PATCH.
+  createEmployeeManual: (payload: z.infer<typeof employeeManualCreateRequest>) =>
+    request(employeeManualCreateResponse, API_PATHS.employeesManual, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  patchImportJobItem: (
+    jobId: string,
+    itemId: string,
+    payload: z.infer<typeof importJobItemPatchRequest>,
+  ) =>
+    request(importJobItemPatchResponse, API_PATHS.importJobItemPatch(jobId, itemId), {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  /**
+   * Phase 11 — fetch a source file by SHA-256 hash. Used by the import
+   * review screen to open the original PDF before commit (the contract
+   * row doesn't exist yet, so `fetchContractFile` is not usable).
+   */
+  fetchSourceFileByHash: async (hash: string, opts: { download?: boolean } = {}) => {
+    if (!API_BASE_URL && import.meta.env.DEV) {
+      throw new ApiUnavailableError('VITE_API_BASE_URL is not set');
+    }
+    const qs = opts.download ? '?download=1' : '';
+    const url = `${API_BASE_URL}${API_PATHS.sourceFileBytes(hash)}${qs}`;
+    const res = await fetch(url, { headers: adminHeaders() });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const body = await res.json() as { message?: string };
+        if (body?.message) msg = body.message;
+      } catch { /* ignore */ }
+      throw new Error(`Source file ${hash} → ${res.status}: ${msg}`);
+    }
+    return res.blob();
+  },
   fetchEmployeeDocumentFile: async (
     employeeId: string,
     docId: string,

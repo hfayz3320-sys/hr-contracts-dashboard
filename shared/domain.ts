@@ -107,6 +107,15 @@ export type Contract = {
   extractionConfidence?: number;
   notes?: string;
   createdAt: string;
+  // Phase 11 — salary breakdown extracted from the source PDF and
+  // persisted by the contract import commit. Optional throughout so
+  // older rows (and the dataset-mock) don't need to carry them.
+  basicSalary?: number | null;
+  housingAllowance?: number | null;
+  transportAllowance?: number | null;
+  otherAllowances?: { code: string; name: string; amount: number }[];
+  totalSalary?: number | null;
+  currency?: string;
   // Phase 3B — populated when the endpoint is called with `?includeEmployee=1`.
   // Both are absent on the bare contract list, so existing consumers are
   // unaffected. The Contracts page passes the flag and renders names from
