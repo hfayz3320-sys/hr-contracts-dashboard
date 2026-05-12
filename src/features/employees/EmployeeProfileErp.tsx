@@ -52,6 +52,7 @@ import type {
 import type {
   EmployeeTimelineEntry, EmployeeActivity,
   EmployeeCompensationLine, EmployeeLearningRecord,
+  AppUser,
 } from '@shared/api-contract';
 
 import { AliveButton } from '@/components/ui-foundation/AliveButton';
@@ -88,6 +89,9 @@ export interface EmployeeProfileErpProps {
   activities?: EmployeeActivity[];
   compensation?: EmployeeCompensationLine[];
   learning?: EmployeeLearningRecord[];
+  /** The app_users row linked to this employee, or null. Pre-migration-0007
+   *  workers don't return this — undefined is interpreted as "unknown". */
+  linkedUser?: AppUser | null;
 }
 
 const TABS = [
@@ -133,7 +137,14 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
 
   const { data: me } = useMe();
   const canWrite = canPerformAdminWrites(me);
-  const writeTooltip = canWrite ? undefined : 'Only admin users can perform this action.';
+  // hr_manager is a read-only role for write actions by design (see
+  // src/lib/auth.ts policy block + worker/src/lib/auth.ts requireAdmin).
+  // The tooltip names the role so the message is actionable, not generic.
+  const writeTooltip = canWrite
+    ? undefined
+    : me?.role === 'hr_manager'
+      ? 'HR Manager role is read-only for Employee 360 writes. Ask an admin to mutate this employee.'
+      : 'Only admin users can perform this action.';
 
   const [tab, setTab] = React.useState<TabKey>('summary');
   const [action, setAction] = React.useState<EmployeeActionKey>(null);
@@ -162,12 +173,22 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
 
               <div className="flex-1" />
 
-              <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<UserPlus className="h-3.5 w-3.5" />} onClick={() => setAction('create-user')}>Create user</AliveButton>
+              {/* Phase 10 — linked-user chip when an app_users row already
+                  points at this employee. Hide the Create user button so
+                  we don't accidentally create a second login for the same
+                  person; re-link / role change goes through /admin/users. */}
+              {props.linkedUser ? (
+                <Chip tone="info" icon={<UserPlus className="h-3 w-3" />}>
+                  Login: {props.linkedUser.email} ({props.linkedUser.role})
+                </Chip>
+              ) : (
+                <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<UserPlus className="h-3.5 w-3.5" />} onClick={() => setAction('create-user')}>Create user</AliveButton>
+              )}
               <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<MessageSquare className="h-3.5 w-3.5" />} onClick={() => setAction('message')}>Send message</AliveButton>
               <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<PencilLine className="h-3.5 w-3.5" />} onClick={() => setAction('note')}>Log note</AliveButton>
               <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<Bell className="h-3.5 w-3.5" />} onClick={() => setAction('activity')}>Activity</AliveButton>
-              <AliveButton variant="ghost" size="xs" disabled title="Document upload with R2 file binary ships in a follow-up. Metadata-only registration via /admin/import works today." icon={<Upload className="h-3.5 w-3.5" />}>Upload</AliveButton>
-              <AliveButton variant="primary" size="xs" disabled title="Transaction creation from profile ships in a follow-up. POST /api/employees/:id/transactions accepts requests today." icon={<Plus className="h-3.5 w-3.5" />}>Transaction</AliveButton>
+              <AliveButton variant="ghost"   size="xs" disabled={!canWrite} title={writeTooltip} icon={<Upload className="h-3.5 w-3.5" />} onClick={() => setAction('document')}>Upload</AliveButton>
+              <AliveButton variant="primary" size="xs" disabled={!canWrite} title={writeTooltip} icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setAction('transaction')}>Transaction</AliveButton>
             </div>
 
             {/* Identity */}
@@ -258,8 +279,7 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
         onCompose={(kind) => setAction(kind === 'message' ? 'message' : kind === 'note' ? 'note' : 'activity')}
       />
 
-      {/* Phase 10 — modals for the 6 wired actions. Trans/Doc/Upload remain
-          tooltip-disabled and route through the Import flow today. */}
+      {/* Phase 10 — modals for all 8 wired actions. */}
       <EmployeeActionsHost
         employeeId={e.id}
         employeeName={e.fullName || e.id}

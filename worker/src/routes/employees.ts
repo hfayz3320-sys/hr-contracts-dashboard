@@ -11,6 +11,7 @@ import { listInsuranceForEmployee } from '../db/repo-insurance';
 import { listAuditForTarget } from '../db/repo-audit';
 import { listDocumentsForEmployee } from '../db/repo-employee-documents';
 import { listTransactionsForEmployee } from '../db/repo-employee-transactions';
+import { findAppUserByEmployeeId } from '../db/repo-users';
 import {
   listTimelineForEmployee,
   listActivitiesForEmployee,
@@ -66,9 +67,24 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
     }
   };
 
+  // Same idea as `safeList` but for a scalar query: returns null if the
+  // employee_id column doesn't exist yet (i.e. migration 0007 hasn't
+  // been applied). app_users.employee_id is the only new column on an
+  // existing business table, so we guard the query that uses it.
+  const safeOne = async <T,>(fn: () => Promise<T | null>): Promise<T | null> => {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/no such column|no such table/i.test(msg)) return null;
+      throw err;
+    }
+  };
+
   const [
     contracts, insurance, audit, documents, transactions,
     timeline, activities, compensation, learning,
+    linkedUser,
   ] = await Promise.all([
     listContractsForEmployee(c.env, id),
     listInsuranceForEmployee(c.env, id),
@@ -82,6 +98,7 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
     safeList(() => listActivitiesForEmployee(c.env, id)),
     safeList(() => listCompensationForEmployee(c.env, id)),
     safeList(() => listLearningForEmployee(c.env, id)),
+    safeOne(() => findAppUserByEmployeeId(c.env, id)),
   ]);
 
   const dataQuality = computeEmployeeDataQuality({
@@ -104,6 +121,9 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
     activities,
     compensation,
     learning,
+    // The app_users row linked to this employee, or null. Read by the
+    // profile to show "Login: alice@example.com (hr_manager)" when set.
+    linkedUser,
   });
 });
 

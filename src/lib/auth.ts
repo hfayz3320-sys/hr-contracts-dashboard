@@ -6,6 +6,22 @@
  * surface before the network call is even made — the server enforces the
  * actual rules.
  *
+ * Permission policy (canonical for the whole app):
+ * ------------------------------------------------
+ *   role        | reads (employee, contracts, ...)        | writes (mutations)
+ *   ------------+------------------------------------------+-------------------
+ *   admin       | yes                                      | YES — all
+ *   hr_manager  | yes — INCLUDING admin module pages       | NO  — read-only
+ *   viewer      | basic reads only (no admin pages, no DQ) | NO
+ *   disabled    | no                                       | NO
+ *
+ * `admin` is the ONLY role that passes the Worker's `requireAdmin`
+ * middleware (which checks the `ADMIN_EMAILS` env allow-list — and the
+ * /api/me bootstrap auto-creates those rows as role='admin'). Every
+ * write endpoint, including the eight Employee 360 actions, is behind
+ * `requireAdmin`. hr_manager users see disabled write buttons with a
+ * tooltip; the UI never lies about what the server will accept.
+ *
  * Phase 8 admin module:
  *   `admin` and `hr_manager` are the two roles allowed into /admin/*.
  *   Everyone else (viewer / disabled / unauthenticated) sees the

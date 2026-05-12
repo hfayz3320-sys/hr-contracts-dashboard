@@ -210,6 +210,9 @@ export const appUserSchema = z.object({
   displayName: z.string().nullable(),
   role: appUserRoleSchema,
   status: appUserStatusSchema,
+  // Phase 10 — link this app_users row to an employee row. Null when the
+  // user is a standalone admin (no matching employee record).
+  employeeId: z.string().nullable().optional(),
   lastLoginAt: z.string().nullable(),
   createdAt: z.string(),
   createdBy: z.string(),
@@ -410,11 +413,17 @@ export const appUserCreateRequest = z.object({
   email: z.string().email(),
   displayName: z.string().nullable().optional(),
   role: appUserRoleSchema,
+  // Phase 10 — optional FK to employees(id). When supplied, the worker
+  // writes it to app_users.employee_id so the app_users row becomes the
+  // queryable link target for "this employee's user account".
+  employeeId: z.string().nullable().optional(),
 });
 export const appUserPatchRequest = z.object({
   displayName: z.string().nullable().optional(),
   role: appUserRoleSchema.optional(),
   status: appUserStatusSchema.optional(),
+  // Allow re-linking / un-linking an app_users row to an employee.
+  employeeId: z.string().nullable().optional(),
 });
 export const appUserPatchResponse = z.object({
   ok: z.literal(true),
@@ -577,6 +586,30 @@ export const employeeDocumentPatchRequest = z.object({
 export const employeeDocumentResponse = z.object({
   ok: z.literal(true),
   document: employeeDocumentSchema,
+});
+
+/**
+ * Phase 10 — multipart upload response.
+ * The endpoint accepts `multipart/form-data` with fields:
+ *   - file        : binary
+ *   - type        : EmployeeDocumentType
+ *   - expiresAt   : optional YYYY-MM-DD
+ *   - docNumber   : optional
+ *   - status      : optional (defaults to 'active')
+ *   - isCurrent   : optional 'true' | 'false' string (defaults true)
+ *   - notes       : optional
+ *
+ * The Worker hashes the file server-side, persists it to the private R2
+ * bucket at `employees/<empId>/<docId>/<filename>`, and writes the
+ * `employee_documents` row + a `source_files` row pointing at the R2
+ * object. The response includes the stored document and the R2 key so the
+ * FE can confirm the file lives in a private path (never `public/...`).
+ */
+export const employeeDocumentUploadResponse = z.object({
+  ok: z.literal(true),
+  document: employeeDocumentSchema,
+  r2ObjectKey: z.string(),
+  sourceFileId: z.string(),
 });
 
 // ---- Transactions ----------------------------------------------------------
@@ -1012,12 +1045,17 @@ export const employee360Response = z.object({
   activities: z.array(employeeActivitySchema).optional(),
   compensation: z.array(employeeCompensationLineSchema).optional(),
   learning: z.array(employeeLearningRecordSchema).optional(),
+  // Phase 10 — the app_users row linked to this employee, or null. Read
+  // by the profile to show "Login: alice@example.com (hr_manager)" or
+  // "No login" when nothing is linked.
+  linkedUser: appUserSchema.nullable().optional(),
 });
 
 export type EmployeeDocument          = z.infer<typeof employeeDocumentSchema>;
 export type EmployeeDocumentsListResponse = z.infer<typeof employeeDocumentsListResponse>;
 export type EmployeeDocumentCreateRequest = z.infer<typeof employeeDocumentCreateRequest>;
 export type EmployeeDocumentPatchRequest  = z.infer<typeof employeeDocumentPatchRequest>;
+export type EmployeeDocumentUploadResponse = z.infer<typeof employeeDocumentUploadResponse>;
 export type EmployeeTransaction       = z.infer<typeof employeeTransactionSchema>;
 export type EmployeeTransactionsListResponse = z.infer<typeof employeeTransactionsListResponse>;
 export type EmployeeTransactionCreateRequest = z.infer<typeof employeeTransactionCreateRequest>;
@@ -1424,6 +1462,9 @@ export const API_PATHS = {
   // client and tests can compile against canonical strings).
   employeeDocuments:    (id: string)                  => `/api/employees/${encodeURIComponent(id)}/documents`,
   employeeDocument:     (id: string, docId: string)   => `/api/employees/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`,
+  // Phase 10 — multipart upload of a raw document file to R2 (private bucket)
+  // with metadata persisted to employee_documents in a single transaction.
+  employeeDocumentUpload: (id: string)                => `/api/employees/${encodeURIComponent(id)}/documents/upload`,
   employeeTransactions: (id: string)                  => `/api/employees/${encodeURIComponent(id)}/transactions`,
   employeeTransaction:  (id: string, txnId: string)   => `/api/employees/${encodeURIComponent(id)}/transactions/${encodeURIComponent(txnId)}`,
   // Phase 6A-1 — HR Configuration foundation.

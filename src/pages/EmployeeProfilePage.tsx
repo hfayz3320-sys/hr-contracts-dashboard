@@ -228,6 +228,7 @@ export function EmployeeProfilePage() {
           {...(data.activities ? { activities: data.activities } : {})}
           {...(data.compensation ? { compensation: data.compensation } : {})}
           {...(data.learning ? { learning: data.learning } : {})}
+          {...(data.linkedUser !== undefined ? { linkedUser: data.linkedUser } : {})}
         />
       </div>
     );

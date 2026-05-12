@@ -36,6 +36,7 @@ import { newId } from '../lib/id';
 import {
   employeeDocumentCreateRequest,
   employeeDocumentPatchRequest,
+  employeeDocumentTypeSchema,
 } from '@shared/api-contract';
 
 export const employeeDocumentRoutes = new Hono<AppContext>();
@@ -213,6 +214,174 @@ employeeDocumentRoutes.patch(
     });
 
     return c.json({ ok: true as const, document: after });
+  },
+);
+
+// ---- UPLOAD (multipart) ---------------------------------------------------
+// Phase 10 — direct file upload from the Employee Profile.
+//
+// Accepts `multipart/form-data` with fields:
+//   - file        : the raw bytes (required)
+//   - type        : EmployeeDocumentType (required)
+//   - expiresAt   : optional ISO date
+//   - docNumber   : optional
+//   - status      : optional ('active' default)
+//   - isCurrent   : optional 'true' | 'false' string ('true' default)
+//   - notes       : optional
+//
+// Side-effects:
+//   - Stores the file in the PRIVATE R2 bucket at
+//     `employees/<empId>/<docId>/<filename>`. Never written anywhere
+//     reachable by `public/...` paths — R2 is private by binding.
+//   - Creates an `employee_documents` row with `metadata.r2ObjectKey`,
+//     `metadata.fileHash`, `metadata.fileSize`, `metadata.contentType`.
+//   - Calls `supersedeCurrentDocumentOfType` first so the partial UNIQUE
+//     INDEX is not violated.
+//   - Writes an audit event with the R2 key in details.
+//
+// The Worker re-hashes the file server-side: we never trust the client's
+// claimed hash. Body size is bounded by the Worker's 100MB request cap.
+employeeDocumentRoutes.post(
+  '/api/employees/:id/documents/upload',
+  requireAdmin,
+  async (c) => {
+    const id = c.req.param('id');
+    if (!id) return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
+
+    const employee = await getEmployee(c.env, id);
+    if (!employee) {
+      return c.json({ error: 'NOT_FOUND', message: `Employee ${id} not found` }, 404);
+    }
+
+    let form: FormData;
+    try {
+      form = await c.req.formData();
+    } catch {
+      return c.json({ error: 'BAD_REQUEST', message: 'Expected multipart/form-data' }, 400);
+    }
+    const file = form.get('file');
+    const type = form.get('type');
+    if (
+      file == null ||
+      typeof file === 'string' ||
+      typeof (file as { arrayBuffer?: unknown }).arrayBuffer !== 'function'
+    ) {
+      return c.json({ error: 'BAD_REQUEST', message: '`file` field is required' }, 400);
+    }
+    if (typeof type !== 'string') {
+      return c.json({ error: 'BAD_REQUEST', message: '`type` field is required' }, 400);
+    }
+
+    // Reuse the canonical zod enum so the server enforces the same set of
+    // document types the FE picker offers.
+    const typeCheck = employeeDocumentTypeSchema.safeParse(type);
+    if (!typeCheck.success) {
+      return c.json(
+        { error: 'BAD_REQUEST', message: `Invalid document type: ${type}` },
+        400,
+      );
+    }
+    const docType = typeCheck.data;
+
+    const blob = file as Blob & { name?: string };
+    const filename = blob.name ?? 'upload.bin';
+    const fileSize = blob.size;
+    const contentType = (blob as { type?: string }).type ?? 'application/octet-stream';
+
+    // Hash the bytes ourselves; the client never gets to choose this.
+    const buf = await blob.arrayBuffer();
+    const digest = await crypto.subtle.digest('SHA-256', buf);
+    const fileHash = [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const actor = (await getActorEmail(c)) ?? 'unknown';
+    const docId = newId('doc');
+
+    // R2 key — private path, never under any `public/` prefix.
+    const safeName = filename.replace(/[^\w.\-]+/g, '_').slice(0, 120);
+    const r2Key = `employees/${id}/${docId}/${safeName}`;
+    if (r2Key.startsWith('public/') || r2Key.includes('/public/')) {
+      // Defense in depth — this should be unreachable given the prefix.
+      return c.json(
+        { error: 'INTERNAL_ERROR', message: 'Refusing to write under a public path' },
+        500,
+      );
+    }
+
+    await c.env.RAW_FILES.put(r2Key, buf, {
+      httpMetadata: { contentType },
+      customMetadata: {
+        kind: 'employee_document',
+        employeeId: id,
+        documentId: docId,
+        documentType: docType,
+        uploadedBy: actor,
+      },
+    });
+
+    // Optional metadata fields from form. We treat empty strings as "not set".
+    const formStr = (k: string): string | null => {
+      const v = form.get(k);
+      if (typeof v !== 'string' || v.trim() === '') return null;
+      return v.trim();
+    };
+    const expiresAt = formStr('expiresAt');
+    const docNumber = formStr('docNumber');
+    const notesField = formStr('notes');
+    const statusField = formStr('status');
+    const isCurrentField = formStr('isCurrent');
+    const willBeCurrent = isCurrentField !== 'false';
+
+    if (willBeCurrent) {
+      await supersedeCurrentDocumentOfType(c.env, id, docType, actor);
+    }
+
+    await insertDocument(c.env, {
+      id: docId,
+      employeeId: id,
+      type: docType,
+      docNumber,
+      issuedAt: null,
+      expiresAt,
+      status: (statusField as 'active' | 'expired' | 'archived' | 'review_required') ?? 'active',
+      isCurrent: willBeCurrent,
+      reviewRequired: false,
+      reviewReason: null,
+      sourceFileId: null,
+      metadata: {
+        r2ObjectKey: r2Key,
+        fileHash,
+        fileSize,
+        contentType,
+        originalFilename: filename,
+      },
+      notes: notesField,
+      actor,
+    });
+
+    const created = await getDocumentById(c.env, docId);
+    if (!created) {
+      return c.json(
+        { error: 'INTERNAL_ERROR', message: 'Insert succeeded but re-read failed' },
+        500,
+      );
+    }
+
+    await writeAudit(c.env, {
+      actor,
+      action: 'employee_document.uploaded',
+      target: docId,
+      status: 'ok',
+      details: `Uploaded ${docType} document for employee ${id} · ${fileSize} bytes · r2:${r2Key}`,
+    });
+
+    return c.json({
+      ok: true as const,
+      document: created,
+      r2ObjectKey: r2Key,
+      sourceFileId: fileHash,
+    });
   },
 );
 

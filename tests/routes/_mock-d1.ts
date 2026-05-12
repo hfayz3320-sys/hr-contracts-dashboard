@@ -166,6 +166,17 @@ function runSelect(
         rows = rows.filter((r) => r[col] === val);
         continue;
       }
+      // LOWER(col) = LOWER(?) — case-insensitive equality. Mirrors the
+      // SQLite `LOWER(email) = LOWER(?)` pattern used by
+      // findAppUserByEmail.
+      const lowerEq = p.match(/^LOWER\((\w+)\)\s*=\s*LOWER\(\?\)$/i);
+      if (lowerEq) {
+        const col = lowerEq[1]!;
+        const val = binds[bindCursor++];
+        const lower = (v: unknown): string => (typeof v === 'string' ? v.toLowerCase() : String(v));
+        rows = rows.filter((r) => lower(r[col]) === lower(val));
+        continue;
+      }
       const eqLit = p.match(/^(\w+)\s*=\s*(\d+|'[^']*')$/);
       if (eqLit) {
         const col = eqLit[1]!;

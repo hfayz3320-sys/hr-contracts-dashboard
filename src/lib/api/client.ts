@@ -53,6 +53,8 @@ import {
   employeeCompensationResponse,
   employeeLearningListResponse,
   employeeLearningResponse,
+  employeeDocumentUploadResponse,
+  employeeTransactionResponse,
 } from '@shared/api-contract';
 import type { z } from 'zod';
 import type {
@@ -74,6 +76,7 @@ import type {
   employeeActivityPatchRequest,
   employeeCompensationCreateRequest,
   employeeLearningCreateRequest,
+  employeeTransactionCreateRequest,
 } from '@shared/api-contract';
 import { adminHeaders } from './admin';
 
@@ -411,6 +414,71 @@ export const api = {
     request(employeeLearningListResponse, API_PATHS.employeeLearning(id)),
   createEmployeeLearning: (id: string, payload: z.infer<typeof employeeLearningCreateRequest>) =>
     request(employeeLearningResponse, API_PATHS.employeeLearning(id), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  // ====================================================================
+  // Phase 10 (followup) — document upload + transaction creation
+  // ====================================================================
+  /**
+   * Multipart upload of an Employee Profile document. The Worker hashes the
+   * file server-side, persists it to the private R2 bucket, and writes the
+   * `employee_documents` metadata row. Returns the stored document + R2 key.
+   */
+  uploadEmployeeDocument: async (
+    employeeId: string,
+    args: {
+      file: File;
+      type: string;
+      expiresAt?: string | null;
+      docNumber?: string | null;
+      notes?: string | null;
+      isCurrent?: boolean;
+    },
+  ) => {
+    if (!API_BASE_URL && import.meta.env.DEV) {
+      throw new ApiUnavailableError('VITE_API_BASE_URL is not set');
+    }
+    const fd = new FormData();
+    fd.append('file', args.file);
+    fd.append('type', args.type);
+    if (args.expiresAt) fd.append('expiresAt', args.expiresAt);
+    if (args.docNumber) fd.append('docNumber', args.docNumber);
+    if (args.notes) fd.append('notes', args.notes);
+    if (args.isCurrent === false) fd.append('isCurrent', 'false');
+    const headers = adminHeaders();
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}${API_PATHS.employeeDocumentUpload(employeeId)}`, {
+        method: 'POST',
+        body: fd,
+        headers,
+      });
+    } catch (err) {
+      throw new ApiUnavailableError(err instanceof Error ? err.message : 'Network error');
+    }
+    if (!res.ok) {
+      let body: unknown = null;
+      try { body = await res.json(); } catch { /* ignore */ }
+      const msg = typeof body === 'object' && body !== null && 'message' in body
+        ? String((body as { message: unknown }).message) : `HTTP ${res.status}`;
+      throw new Error(
+        `API ${API_PATHS.employeeDocumentUpload(employeeId)} → ${res.status}: ${msg}`,
+      );
+    }
+    const json = await res.json();
+    const parsed = employeeDocumentUploadResponse.safeParse(json);
+    if (!parsed.success) {
+      throw new Error(`upload bad payload: ${parsed.error.message}`);
+    }
+    return parsed.data;
+  },
+  createEmployeeTransaction: (
+    employeeId: string,
+    payload: z.infer<typeof employeeTransactionCreateRequest>,
+  ) =>
+    request(employeeTransactionResponse, API_PATHS.employeeTransactions(employeeId), {
       method: 'POST',
       body: JSON.stringify(payload),
       admin: true,

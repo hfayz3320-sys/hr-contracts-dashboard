@@ -69,6 +69,10 @@ userRoutes.post('/api/users', requireAdmin, async (c) => {
     displayName: parsed.data.displayName ?? null,
     role: parsed.data.role,
     status: 'active',
+    // Phase 10 — link to an employee record when supplied. Worker writes
+    // it to app_users.employee_id; the row becomes queryable via
+    // findAppUserByEmployeeId.
+    employeeId: parsed.data.employeeId ?? null,
     createdBy: actor,
   });
   await writeAudit(c.env, {
@@ -76,7 +80,9 @@ userRoutes.post('/api/users', requireAdmin, async (c) => {
     action: 'user.created',
     target: user.id,
     status: 'ok',
-    details: `Created ${user.email} as ${user.role}`,
+    details:
+      `Created ${user.email} as ${user.role}` +
+      (parsed.data.employeeId ? ` (linked to employee ${parsed.data.employeeId})` : ''),
   });
   return c.json({ ok: true as const, user });
 });

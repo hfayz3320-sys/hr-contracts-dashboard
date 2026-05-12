@@ -15,6 +15,9 @@ export type AppUser = {
   displayName: string | null;
   role: AppUserRole;
   status: AppUserStatus;
+  // Phase 10 — FK to employees(id). Null when the user is not linked to
+  // an employee record (e.g. external admin).
+  employeeId: string | null;
   lastLoginAt: string | null;
   createdAt: string;
   createdBy: string;
@@ -28,6 +31,9 @@ type AppUserRow = {
   display_name: string | null;
   role: AppUserRole;
   status: AppUserStatus;
+  // Migration 0007 added this column. Older D1 dumps (pre-0007) will
+  // simply not return it; we coalesce to null in `rowToUser`.
+  employee_id?: string | null;
   last_login_at: string | null;
   created_at: string;
   created_by: string;
@@ -42,6 +48,7 @@ function rowToUser(r: AppUserRow): AppUser {
     displayName: r.display_name,
     role: r.role,
     status: r.status,
+    employeeId: r.employee_id ?? null,
     lastLoginAt: r.last_login_at,
     createdAt: r.created_at,
     createdBy: r.created_by,
@@ -79,6 +86,9 @@ export type CreateAppUserInput = {
   displayName?: string | null;
   role: AppUserRole;
   status?: AppUserStatus;
+  // Phase 10 — optional FK to employees(id). When set, the app_users row
+  // becomes the canonical "login for this employee" link.
+  employeeId?: string | null;
   createdBy: string;
 };
 
@@ -86,8 +96,8 @@ export async function insertAppUser(env: Env, input: CreateAppUserInput): Promis
   await env.DB
     .prepare(
       `INSERT INTO app_users
-         (id, email, display_name, role, status, created_by, updated_by)
-       VALUES (?, LOWER(?), ?, ?, ?, ?, ?)`,
+         (id, email, display_name, role, status, employee_id, created_by, updated_by)
+       VALUES (?, LOWER(?), ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       input.id,
@@ -95,6 +105,7 @@ export async function insertAppUser(env: Env, input: CreateAppUserInput): Promis
       input.displayName ?? null,
       input.role,
       input.status ?? 'active',
+      input.employeeId ?? null,
       input.createdBy,
       input.createdBy,
     )
@@ -107,7 +118,12 @@ export async function insertAppUser(env: Env, input: CreateAppUserInput): Promis
 export async function updateAppUserFields(
   env: Env,
   id: string,
-  patch: Partial<{ displayName: string | null; role: AppUserRole; status: AppUserStatus }>,
+  patch: Partial<{
+    displayName: string | null;
+    role: AppUserRole;
+    status: AppUserStatus;
+    employeeId: string | null;
+  }>,
   updatedBy: string,
 ): Promise<void> {
   const sets: string[] = [];
@@ -115,6 +131,7 @@ export async function updateAppUserFields(
   if (patch.displayName !== undefined) { sets.push('display_name = ?'); binds.push(patch.displayName); }
   if (patch.role !== undefined)        { sets.push('role = ?');         binds.push(patch.role); }
   if (patch.status !== undefined)      { sets.push('status = ?');       binds.push(patch.status); }
+  if (patch.employeeId !== undefined)  { sets.push('employee_id = ?');  binds.push(patch.employeeId); }
   if (sets.length === 0) return;
   sets.push("updated_at = datetime('now')");
   sets.push('updated_by = ?');
@@ -123,6 +140,22 @@ export async function updateAppUserFields(
     .prepare(`UPDATE app_users SET ${sets.join(', ')} WHERE id = ?`)
     .bind(...binds)
     .run();
+}
+
+/**
+ * Phase 10 — find the app_users row linked to a specific employee, if any.
+ * Returns null if no app_user has employee_id = :employeeId. Used by the
+ * Employee 360 endpoint to surface "Linked user" status.
+ */
+export async function findAppUserByEmployeeId(
+  env: Env,
+  employeeId: string,
+): Promise<AppUser | null> {
+  const r = await env.DB
+    .prepare(`SELECT * FROM app_users WHERE employee_id = ? LIMIT 1`)
+    .bind(employeeId)
+    .first<AppUserRow>();
+  return r ? rowToUser(r) : null;
 }
 
 export async function touchLastLogin(env: Env, email: string): Promise<void> {

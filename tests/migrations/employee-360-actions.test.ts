@@ -88,7 +88,9 @@ describe('migration 0007 — Employee 360 actions', () => {
 
   it('every new table references employees(id) ON DELETE CASCADE', () => {
     for (const t of NEW_TABLES) {
-      const block = SQL.match(new RegExp(`CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${t}\\b[\\s\\S]*?\\);`, 'i'))?.[0]!;
+      const m = SQL.match(new RegExp(`CREATE\\s+TABLE\\s+IF\\s+NOT\\s+EXISTS\\s+${t}\\b[\\s\\S]*?\\);`, 'i'));
+      expect(m, `block for ${t}`).toBeTruthy();
+      const block = m![0];
       expect(block, `${t} → employees FK`).toMatch(/REFERENCES\s+employees\(id\)\s+ON\s+DELETE\s+CASCADE/i);
     }
   });

@@ -20,6 +20,7 @@ import type {
   EmployeeActivityPatchRequest,
   EmployeeCompensationCreateRequest,
   EmployeeLearningCreateRequest,
+  EmployeeTransactionCreateRequest,
 } from '@shared/api-contract';
 
 export const queryKeys = {
@@ -342,6 +343,34 @@ export function useCreateEmployeeLearning(employeeId: string) {
   return useMutation({
     mutationFn: (payload: EmployeeLearningCreateRequest) =>
       api.createEmployeeLearning(employeeId, payload),
+    onSuccess: () => invalidate(),
+  });
+}
+
+/**
+ * Multipart upload — see `api.uploadEmployeeDocument`. Invalidates the
+ * Employee 360 query so the Documents tab refreshes after success.
+ */
+export function useUploadEmployeeDocument(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (args: {
+      file: File;
+      type: string;
+      expiresAt?: string | null;
+      docNumber?: string | null;
+      notes?: string | null;
+      isCurrent?: boolean;
+    }) => api.uploadEmployeeDocument(employeeId, args),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useCreateEmployeeTransaction(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (payload: EmployeeTransactionCreateRequest) =>
+      api.createEmployeeTransaction(employeeId, payload),
     onSuccess: () => invalidate(),
   });
 }

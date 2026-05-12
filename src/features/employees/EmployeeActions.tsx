@@ -33,11 +33,14 @@ import {
   useCreateEmployeeCompensation,
   useCreateEmployeeLearning,
   useCreateAppUser,
+  useUploadEmployeeDocument,
+  useCreateEmployeeTransaction,
 } from '@/lib/api/hooks';
 import type {
   EmployeeActivityCreateRequest,
   EmployeeCompensationCreateRequest,
   EmployeeLearningCreateRequest,
+  EmployeeTransactionCreateRequest,
 } from '@shared/api-contract';
 
 export type EmployeeActionKey =
@@ -68,9 +71,8 @@ export function EmployeeActionsHost(props: BaseProps) {
       <CompensationModal open={open === 'compensation'} onClose={onClose} employeeId={employeeId} />
       <LearningModal     open={open === 'learning'}     onClose={onClose} employeeId={employeeId} />
       <CreateUserModal   open={open === 'create-user'}  onClose={onClose} employeeId={employeeId} employeeName={employeeName} />
-      {/* Transaction + Document modals are placeholders pointing at existing
-          endpoints; documents+transactions rows already render in their tabs.
-          A full create-from-profile flow is wired in a follow-up. */}
+      <UploadModal       open={open === 'document'}     onClose={onClose} employeeId={employeeId} />
+      <TransactionModal  open={open === 'transaction'}  onClose={onClose} employeeId={employeeId} />
     </>
   );
 }
@@ -421,14 +423,16 @@ function CreateUserModal({
   async function submit() {
     if (!email.trim()) return;
     try {
-      // Link to this employee via displayName tag; the worker's createUser
-      // does not currently accept an employee_id arg, so we tag the
-      // displayName for traceability. A future migration extends the
-      // create-user endpoint to accept the link FK directly.
+      // Phase 10 — pass `employeeId` as the FK. The Worker writes it to
+      // app_users.employee_id (migration 0007 added the column) so the
+      // created row is queryable as the canonical login for this
+      // employee. `displayName` is the user-facing label; the link is
+      // structural, not derived from a string tag.
       await mut.mutateAsync({
         email: email.trim().toLowerCase(),
         role,
-        displayName: employeeName ? `${employeeName} (emp:${employeeId})` : null,
+        displayName: employeeName || null,
+        employeeId,
       });
       toast.success('User created', { description: `Linked to ${employeeName}.` });
       onClose();
@@ -465,6 +469,244 @@ function CreateUserModal({
           <AliveButton variant="ghost" size="sm" onClick={onClose} disabled={mut.isPending}>Cancel</AliveButton>
           <AliveButton variant="primary" size="sm" onClick={submit} disabled={!email.trim() || mut.isPending}>
             {mut.isPending ? 'Creating…' : 'Create user'}
+          </AliveButton>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================
+// Upload Document (multipart → R2 + employee_documents)
+// ============================================================
+
+const UPLOAD_DOC_TYPES = [
+  'iqama', 'passport', 'visa', 'work_permit',
+  'contract_pdf', 'insurance_card',
+  'medical_certificate', 'driving_license', 'other',
+] as const;
+type UploadDocType = typeof UPLOAD_DOC_TYPES[number];
+
+function UploadModal({ open, onClose, employeeId }: { open: boolean; onClose: () => void; employeeId: string }) {
+  const [file, setFile] = React.useState<File | null>(null);
+  const [docType, setDocType] = React.useState<UploadDocType>('iqama');
+  const [expiresAt, setExpiresAt] = React.useState('');
+  const [docNumber, setDocNumber] = React.useState('');
+  const [notes, setNotes] = React.useState('');
+  const mut = useUploadEmployeeDocument(employeeId);
+
+  React.useEffect(() => {
+    if (open) {
+      setFile(null);
+      setDocType('iqama');
+      setExpiresAt('');
+      setDocNumber('');
+      setNotes('');
+    }
+  }, [open]);
+
+  async function submit() {
+    if (!file) return;
+    try {
+      const res = await mut.mutateAsync({
+        file,
+        type: docType,
+        expiresAt: expiresAt || null,
+        docNumber: docNumber || null,
+        notes: notes || null,
+      });
+      toast.success('Document uploaded', {
+        description: `Stored as ${docType} (${(file.size / 1024).toFixed(1)} KB).`,
+      });
+      // Defense in depth: warn if the response somehow surfaces a public path.
+      if (res.r2ObjectKey.startsWith('public/') || res.r2ObjectKey.includes('/public/')) {
+        console.error('[upload] server returned a public r2 key:', res.r2ObjectKey);
+      }
+      onClose();
+    } catch (err) {
+      toast.error('Could not upload', { description: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>Upload document</DialogTitle>
+          <DialogDescription>
+            Stored in the private R2 bucket; metadata persisted on this employee's document list.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div>
+            <Label>File</Label>
+            <Input
+              type="file"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              disabled={mut.isPending}
+            />
+            {file && (
+              <p className="mt-1 text-[11.5px] text-muted-foreground">
+                {file.name} · {(file.size / 1024).toFixed(1)} KB
+              </p>
+            )}
+          </div>
+          <div>
+            <Label>Type</Label>
+            <Select value={docType} onValueChange={(v) => setDocType(v as UploadDocType)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {UPLOAD_DOC_TYPES.map((t) => (
+                  <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Doc number</Label>
+              <Input value={docNumber} onChange={(e) => setDocNumber(e.target.value)} placeholder="optional" />
+            </div>
+            <div>
+              <Label>Expires</Label>
+              <Input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <AliveButton variant="ghost" size="sm" onClick={onClose} disabled={mut.isPending}>Cancel</AliveButton>
+          <AliveButton variant="primary" size="sm" onClick={submit} disabled={!file || mut.isPending}>
+            {mut.isPending ? 'Uploading…' : 'Upload'}
+          </AliveButton>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ============================================================
+// Transaction
+// ============================================================
+
+const TRANSACTION_TYPES: EmployeeTransactionCreateRequest['type'][] = [
+  'flight_ticket', 'iqama_renewal', 'visa', 'exit_re_entry', 'vacation',
+  'salary_adjustment', 'allowance_change', 'warning', 'document_request',
+  'contract_renewal_request', 'insurance_update', 'training', 'transfer',
+  'promotion', 'termination', 'medical_claim', 'other',
+];
+const TRANSACTION_STATUSES: NonNullable<EmployeeTransactionCreateRequest['status']>[] = [
+  'requested', 'approved', 'rejected', 'in_progress', 'completed', 'cancelled',
+];
+
+function TransactionModal({ open, onClose, employeeId }: { open: boolean; onClose: () => void; employeeId: string }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [form, setForm] = React.useState<EmployeeTransactionCreateRequest>({
+    type: 'other', title: '', status: 'requested', effectiveDate: today,
+  });
+  const [notes, setNotes] = React.useState('');
+  const mut = useCreateEmployeeTransaction(employeeId);
+
+  React.useEffect(() => {
+    if (open) {
+      setForm({ type: 'other', title: '', status: 'requested', effectiveDate: today });
+      setNotes('');
+    }
+  }, [open, today]);
+
+  async function submit() {
+    if (!form.title.trim()) return;
+    try {
+      await mut.mutateAsync({
+        type: form.type,
+        title: form.title.trim(),
+        status: form.status,
+        ...(form.effectiveDate ? { effectiveDate: form.effectiveDate } : {}),
+        ...(form.endDate ? { endDate: form.endDate } : {}),
+        // Free-text notes go into metadata so we don't need a dedicated
+        // column on `employee_transactions`. The transaction-row view in
+        // the tab renders metadata.notes inline when present.
+        ...(notes.trim() ? { metadata: { notes: notes.trim() } } : {}),
+      });
+      toast.success('Transaction created');
+      onClose();
+    } catch (err) {
+      toast.error('Could not save', { description: err instanceof Error ? err.message : 'Unknown error' });
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>New transaction</DialogTitle>
+          <DialogDescription>
+            Flight ticket, iqama renewal, vacation, salary adjustment, warning, training, transfer, etc.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Type</Label>
+              <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as EmployeeTransactionCreateRequest['type'] })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TRANSACTION_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Status</Label>
+              <Select value={form.status ?? 'requested'} onValueChange={(v) => setForm({ ...form, status: v as NonNullable<EmployeeTransactionCreateRequest['status']> })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TRANSACTION_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>{s.replace(/_/g, ' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div>
+            <Label>Title</Label>
+            <Input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              placeholder="Annual vacation, iqama renewal, etc."
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label>Effective date</Label>
+              <Input
+                type="date"
+                value={form.effectiveDate ?? ''}
+                onChange={(e) => setForm({ ...form, effectiveDate: e.target.value || null })}
+              />
+            </div>
+            <div>
+              <Label>End date (optional)</Label>
+              <Input
+                type="date"
+                value={form.endDate ?? ''}
+                onChange={(e) => setForm({ ...form, endDate: e.target.value || null })}
+              />
+            </div>
+          </div>
+          <div>
+            <Label>Notes</Label>
+            <Textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </div>
+        </div>
+        <DialogFooter>
+          <AliveButton variant="ghost" size="sm" onClick={onClose} disabled={mut.isPending}>Cancel</AliveButton>
+          <AliveButton variant="primary" size="sm" onClick={submit} disabled={!form.title.trim() || mut.isPending}>
+            {mut.isPending ? 'Saving…' : 'Create transaction'}
           </AliveButton>
         </DialogFooter>
       </DialogContent>
