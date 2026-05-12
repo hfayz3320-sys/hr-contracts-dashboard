@@ -9,6 +9,7 @@ import { useState, useMemo } from 'react';
 import { Plus, ShieldOff, Users as UsersIcon, ShieldCheck, UserCog, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageHeader } from '@/components/common/PageHeader';
+import { PathBackButton } from '@/components/common/PathBackButton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -63,6 +64,9 @@ export function UsersPage() {
   if (!isAdmin) {
     return (
       <div>
+        <div className="mb-4">
+          <PathBackButton />
+        </div>
         <PageHeader title="Users & Permissions" description="Manage who can use this app and what they can do." />
         <Card>
           <CardContent className="p-0">
@@ -162,6 +166,9 @@ function UsersTable({ currentEmail }: { currentEmail: string | null }) {
 
   return (
     <div>
+      <div className="mb-4">
+        <PathBackButton />
+      </div>
       <PageHeader
         title="Users & Permissions"
         description={`${counts.total} user${counts.total === 1 ? '' : 's'} · ${counts.admins} admin · ${counts.hr} HR · ${counts.viewers} viewer · ${counts.disabled} disabled`}

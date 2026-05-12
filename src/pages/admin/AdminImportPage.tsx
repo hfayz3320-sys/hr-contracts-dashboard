@@ -9,12 +9,14 @@
 import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
+import { PathBackButton } from '@/components/common/PathBackButton';
 import { ImportWizard } from '@/features/imports/ImportWizard';
 import { routes } from '@/lib/routes';
 
 export function AdminImportPage() {
   return (
     <div className="space-y-4">
+      <PathBackButton />
       <PageHeader
         title="Import Center"
         description="Admin-only ingestion of HR data (employees / insurance / contract PDFs). Files are parsed in-browser, raw bytes go to private R2, dry-run preview holds back conflicts."

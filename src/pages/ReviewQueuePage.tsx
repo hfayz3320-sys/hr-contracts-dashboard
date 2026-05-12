@@ -39,6 +39,7 @@ import {
 import { useMe } from '@/lib/api/use-me';
 import { ExportButton } from '@/components/common/ExportButton';
 import { EmployeeSearchPicker } from '@/components/common/EmployeeSearchPicker';
+import { PathBackButton } from '@/components/common/PathBackButton';
 import type { Employee } from '@/types/domain';
 
 type StatusFilter = 'open' | 'all' | 'dismissed' | 'resolved';
@@ -88,6 +89,11 @@ export function ReviewQueuePage() {
 
   return (
     <div>
+      {/* Renders nothing at the legacy /review route; renders Back to /admin
+          when mounted under /admin/review. */}
+      <div className="mb-4">
+        <PathBackButton />
+      </div>
       <PageHeader
         title="Review Queue"
         description="Triage review items flagged by importers — approve corrected fields, dismiss false positives, or reject with a reason."

@@ -1,8 +1,9 @@
 /**
- * EmployeeProfileErp — Phase 7A.
+ * EmployeeProfileErp — Phase 7A → Phase 9 default.
  *
- * Alternative Employee 360 layout, behind the `?profile=erp` query flag.
- * Renders the SAME real data that the default profile uses; no mocks.
+ * Official Employee 360 profile layout. The old layout remains mounted
+ * behind `?profile=legacy` for emergency rollback; there is NO UI link
+ * to it. Renders the SAME real data that the legacy profile uses; no mocks.
  *
  *   ┌──────────────────────────────────────┬──────────────┐
  *   │  HERO (avatar · name · chips)        │              │

@@ -12,6 +12,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Building2, FileText, Wallet, GraduationCap, Settings as SettingsIcon, ScrollText } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
+import { PathBackButton } from '@/components/common/PathBackButton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui-foundation/EmptyState';
@@ -66,6 +67,7 @@ export function AdminConfigPage() {
 
   return (
     <div className="space-y-4">
+      <PathBackButton />
       <PageHeader
         title="HR Configuration"
         description="Reference tables backing the HR module. Seeded in production during Phase 6A-2. Read-only in this phase — the editor ships later."

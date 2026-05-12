@@ -16,6 +16,7 @@ import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Gauge, AlertTriangle, ShieldCheck, FileText } from 'lucide-react';
 import { PageHeader } from '@/components/common/PageHeader';
+import { PathBackButton } from '@/components/common/PathBackButton';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui-foundation/EmptyState';
@@ -47,6 +48,7 @@ export function AdminDataQualityPage() {
 
   return (
     <div className="space-y-4">
+      <PathBackButton />
       <PageHeader
         title="Data Quality"
         description="Aggregate data-quality signals from the review queue and the contracts read-time classifier. The per-employee report is computed on each profile's Data Quality tab."

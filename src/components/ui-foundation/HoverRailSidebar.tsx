@@ -116,6 +116,8 @@ export function HoverRailSidebar() {
   const [pinned, setPinned] = React.useState<boolean>(() => readPinned());
   const [hoverExpanded, setHoverExpanded] = React.useState(false);
   const [focusExpanded, setFocusExpanded] = React.useState(false);
+  const asideRef = React.useRef<HTMLElement | null>(null);
+  const location = useLocation();
 
   const expanded = pinned || hoverExpanded || focusExpanded;
 
@@ -157,6 +159,35 @@ export function HoverRailSidebar() {
     return () => window.removeEventListener('keydown', onKey);
   }, [pinned, clearCloseTimer]);
 
+  // Auto-collapse when the route changes. The rail was previously persisting
+  // its expanded state across navigations — including in the "hovered then
+  // clicked a link" case — and that ended up hanging over the page until
+  // the user wiggled the mouse out. If the user pinned the rail explicitly,
+  // honour that and don't touch it.
+  React.useEffect(() => {
+    if (pinned) return;
+    clearCloseTimer();
+    setHoverExpanded(false);
+    setFocusExpanded(false);
+  }, [location.pathname, pinned, clearCloseTimer]);
+
+  // Auto-collapse on outside click. mousedown on document outside the aside
+  // collapses immediately (faster than the 120ms hover-close buffer, which
+  // can otherwise leave the rail covering content the user just clicked).
+  React.useEffect(() => {
+    if (pinned) return;
+    function onMouseDown(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (asideRef.current && asideRef.current.contains(target)) return;
+      clearCloseTimer();
+      setHoverExpanded(false);
+      setFocusExpanded(false);
+    }
+    window.addEventListener('mousedown', onMouseDown);
+    return () => window.removeEventListener('mousedown', onMouseDown);
+  }, [pinned, clearCloseTimer]);
+
   function togglePin() {
     const next = !pinned;
     setPinned(next);
@@ -169,6 +200,7 @@ export function HoverRailSidebar() {
 
   return (
     <aside
+      ref={asideRef}
       className={cn(
         'hidden md:flex fixed inset-y-0 left-0 z-40 flex-col bg-sidebar text-sidebar-foreground',
         'border-r border-sidebar-border',

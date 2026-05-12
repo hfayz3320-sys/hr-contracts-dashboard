@@ -20,8 +20,9 @@
  * (Edit profile, transactions create, document upload). Tooltips on every
  * disabled control state the gating phase.
  */
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { EmployeeProfileErp } from '@/features/employees/EmployeeProfileErp';
+import { PathBackButton } from '@/components/common/PathBackButton';
 import {
   FileText,
   HeartPulse,
@@ -108,9 +109,10 @@ export function EmployeeProfilePage() {
   const isAdmin = me?.isAdmin === true;
   const query = useEmployee360(id ?? null);
   const [searchParams] = useSearchParams();
-  // Phase 7A: opt-in ERP-style layout. Default route is unchanged; users
-  // (and us, in QA) can switch via ?profile=erp. No backend changes.
-  const useErpProfile = searchParams.get('profile') === 'erp';
+  // Phase 9: the ERP layout is now the official Employee 360 profile. The
+  // old layout stays mounted behind `?profile=legacy` for emergency
+  // rollback only — there is NO UI link to it.
+  const useErpProfile = searchParams.get('profile') !== 'legacy';
 
   // ------ Loading state — skeleton that matches the real layout ----------
   if (query.isLoading) {
@@ -196,25 +198,13 @@ export function EmployeeProfilePage() {
     e.employeeNumberHistory.find((h) => h.to == null)?.number ?? null;
   const split = splitContractsByLifecycle(contracts);
 
-  // ----- Phase 7A: ERP-style layout, opt-in via ?profile=erp ------------
+  // Phase 9 — the ERP layout is the official Employee 360 profile.
   if (useErpProfile) {
     return (
       <div className="space-y-4">
+        <PathBackButton />
         <PageHeader
           title="Employee profile"
-          description={
-            <span className="inline-flex items-center gap-2 text-[12px]">
-              <span className="inline-flex items-center gap-1 rounded-full border border-status-info/30 bg-status-info-soft px-2 py-0.5 text-status-info font-medium">
-                ERP preview
-              </span>
-              <Link
-                to={`?`}
-                className="text-muted-foreground hover:text-foreground transition-colors duration-fast underline-offset-2 hover:underline"
-              >
-                Switch to default layout
-              </Link>
-            </span>
-          }
           breadcrumb={[
             { label: 'Employees', to: routes.employees },
             { label: e.fullName || safeId },
@@ -257,14 +247,6 @@ export function EmployeeProfilePage() {
 
   const headerActions = (
     <>
-      <Link
-        to="?profile=erp"
-        className="inline-flex items-center gap-1 h-9 px-3 text-[12px] font-medium rounded-md border border-status-info/30 bg-status-info-soft text-status-info hover:brightness-105 transition-[filter,background-color] duration-fast active:translate-y-[1px] active:duration-75"
-        title="Open the ERP-style layout (preview, mock-free)"
-      >
-        <Sparkles className="h-3.5 w-3.5" />
-        Try ERP preview
-      </Link>
       <PressableButton
         variant="outline"
         size="sm"
@@ -288,6 +270,7 @@ export function EmployeeProfilePage() {
 
   return (
     <div className="space-y-6">
+      <PathBackButton />
       <PageHeader
         title="Employee profile"
         breadcrumb={[

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { PageHeader } from '@/components/common/PageHeader';
+import { PathBackButton } from '@/components/common/PathBackButton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { useDataset } from '@/app/dataset-context';
@@ -45,6 +46,9 @@ export function AdminPage() {
 
   return (
     <div>
+      <div className="mb-4">
+        <PathBackButton />
+      </div>
       <PageHeader
         title="Admin · Audit"
         description="Operational view of imports, source files, audit log, errors, and security checks."
