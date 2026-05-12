@@ -17,6 +17,7 @@ import { debugRoutes } from './routes/debug';
 import { employeeDocumentRoutes } from './routes/employee-documents';
 import { employeeTransactionRoutes } from './routes/employee-transactions';
 import { hrConfigRoutes } from './routes/hr-config';
+import { employee360ActionsRoutes } from './routes/employee-360-actions';
 
 const app = new Hono<AppContext>();
 
@@ -80,6 +81,8 @@ app.route('/', employeeDocumentRoutes);
 app.route('/', employeeTransactionRoutes);
 // Phase 6A-1 — HR configuration foundation.
 app.route('/', hrConfigRoutes);
+// Phase 10 — Employee 360 actions (timeline / activities / compensation / learning).
+app.route('/', employee360ActionsRoutes);
 
 app.notFound((c) => c.json({ error: 'NOT_FOUND', message: 'No route matched' }, 404));
 

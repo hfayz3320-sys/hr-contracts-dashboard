@@ -11,6 +11,12 @@ import { listInsuranceForEmployee } from '../db/repo-insurance';
 import { listAuditForTarget } from '../db/repo-audit';
 import { listDocumentsForEmployee } from '../db/repo-employee-documents';
 import { listTransactionsForEmployee } from '../db/repo-employee-transactions';
+import {
+  listTimelineForEmployee,
+  listActivitiesForEmployee,
+  listCompensationForEmployee,
+  listLearningForEmployee,
+} from '../db/repo-employee-360-actions';
 import { computeEmployeeDataQuality } from '../lib/employee-data-quality';
 import { requireAuth, requireAdmin, getActorEmail } from '../lib/auth';
 import { writeAudit } from '../lib/audit';
@@ -60,12 +66,22 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
     }
   };
 
-  const [contracts, insurance, audit, documents, transactions] = await Promise.all([
+  const [
+    contracts, insurance, audit, documents, transactions,
+    timeline, activities, compensation, learning,
+  ] = await Promise.all([
     listContractsForEmployee(c.env, id),
     listInsuranceForEmployee(c.env, id),
     listAuditForTarget(c.env, id),
     safeList(() => listDocumentsForEmployee(c.env, id)),
     safeList(() => listTransactionsForEmployee(c.env, id)),
+    // Phase 10 additions — same pre-migration safety: migration 0007 may
+    // not be applied yet on this environment. Fall back to empty arrays
+    // until then so the existing surfaces keep working.
+    safeList(() => listTimelineForEmployee(c.env, id)),
+    safeList(() => listActivitiesForEmployee(c.env, id)),
+    safeList(() => listCompensationForEmployee(c.env, id)),
+    safeList(() => listLearningForEmployee(c.env, id)),
   ]);
 
   const dataQuality = computeEmployeeDataQuality({
@@ -83,6 +99,11 @@ employeeRoutes.get('/api/employees/:id', async (c) => {
     documents,
     transactions,
     dataQuality,
+    // Phase 10 — always present, possibly empty arrays.
+    timeline,
+    activities,
+    compensation,
+    learning,
   });
 });
 

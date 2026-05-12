@@ -221,6 +221,13 @@ export function EmployeeProfilePage() {
           isAdmin={isAdmin}
           canSeeDataQuality={isAdmin || me?.role === 'hr_manager'}
           redactedIdentity={redactIdentity(e.identityNumber, isAdmin)}
+          // Phase 10 — pass new Employee 360 collections through. If the
+          // worker response is older and doesn't include them, defaults
+          // (empty arrays) are applied inside the component.
+          {...(data.timeline ? { timeline: data.timeline } : {})}
+          {...(data.activities ? { activities: data.activities } : {})}
+          {...(data.compensation ? { compensation: data.compensation } : {})}
+          {...(data.learning ? { learning: data.learning } : {})}
         />
       </div>
     );

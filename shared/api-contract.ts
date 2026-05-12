@@ -842,10 +842,162 @@ export const employeeDataQualityReportSchema = z.object({
 
 // ---- Employee 360 extension ------------------------------------------------
 
+// =========================================================================
+// Phase 10 — Employee 360 actions
+// =========================================================================
+
+// ---- timeline entries (messages + notes) ---------------------------------
+export const employeeTimelineEntryTypeSchema = z.enum(['message', 'note']);
+export const employeeTimelineEntrySchema = z.object({
+  id: z.string(),
+  employeeId: z.string(),
+  entryType: employeeTimelineEntryTypeSchema,
+  body: z.string(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+});
+export const employeeTimelineEntryCreateRequest = z.object({
+  body: z.string().min(1).max(10_000),
+});
+export const employeeTimelineEntryCreateResponse = z.object({
+  ok: z.literal(true),
+  entry: employeeTimelineEntrySchema,
+});
+export const employeeTimelineListResponse = z.object({
+  items: z.array(employeeTimelineEntrySchema),
+  total: z.number().int().nonnegative(),
+});
+
+// ---- activities ----------------------------------------------------------
+export const employeeActivityTypeSchema = z.enum([
+  'call', 'meeting', 'review', 'reminder', 'follow_up', 'document_request', 'other',
+]);
+export const employeeActivityStatusSchema = z.enum(['open', 'done', 'cancelled']);
+export const employeeActivitySchema = z.object({
+  id: z.string(),
+  employeeId: z.string(),
+  activityType: employeeActivityTypeSchema,
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  status: employeeActivityStatusSchema,
+  assignedTo: z.string().nullable().optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  completedAt: z.string().nullable().optional(),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+});
+export const employeeActivityCreateRequest = z.object({
+  activityType: employeeActivityTypeSchema,
+  title: z.string().min(1).max(200),
+  description: z.string().max(5_000).nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  assignedTo: z.string().nullable().optional(),
+});
+export const employeeActivityPatchRequest = z.object({
+  status: employeeActivityStatusSchema.optional(),
+  title: z.string().min(1).max(200).optional(),
+  description: z.string().max(5_000).nullable().optional(),
+  dueDate: z.string().nullable().optional(),
+  assignedTo: z.string().nullable().optional(),
+});
+export const employeeActivityResponse = z.object({
+  ok: z.literal(true),
+  activity: employeeActivitySchema,
+});
+export const employeeActivityListResponse = z.object({
+  items: z.array(employeeActivitySchema),
+  total: z.number().int().nonnegative(),
+});
+
+// ---- compensation lines --------------------------------------------------
+export const employeeCompensationFrequencySchema = z.enum(['monthly', 'yearly', 'one_time']);
+export const employeeCompensationSourceSchema = z.enum(['manual', 'import', 'contract']);
+export const employeeCompensationLineSchema = z.object({
+  id: z.string(),
+  employeeId: z.string(),
+  componentCode: z.string(),
+  componentName: z.string(),
+  amount: z.number(),
+  currency: z.string(),
+  frequency: employeeCompensationFrequencySchema,
+  effectiveFrom: z.string(),
+  effectiveTo: z.string().nullable().optional(),
+  source: employeeCompensationSourceSchema,
+  notes: z.string().nullable().optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+});
+export const employeeCompensationCreateRequest = z.object({
+  componentCode: z.string().min(1).max(64),
+  componentName: z.string().min(1).max(200),
+  amount: z.number(),
+  currency: z.string().min(1).max(8).default('SAR'),
+  frequency: employeeCompensationFrequencySchema.default('monthly'),
+  effectiveFrom: z.string().min(1),
+  effectiveTo: z.string().nullable().optional(),
+  notes: z.string().max(5_000).nullable().optional(),
+});
+export const employeeCompensationResponse = z.object({
+  ok: z.literal(true),
+  line: employeeCompensationLineSchema,
+});
+export const employeeCompensationListResponse = z.object({
+  items: z.array(employeeCompensationLineSchema),
+  total: z.number().int().nonnegative(),
+});
+
+// ---- learning records ----------------------------------------------------
+export const employeeLearningTypeSchema = z.enum(['certification', 'training', 'skill', 'experience']);
+export const employeeLearningStatusSchema = z.enum(['active', 'expiring', 'expired', 'archived']);
+export const employeeLearningLevelSchema = z.enum(['beginner', 'intermediate', 'expert']);
+export const employeeLearningRecordSchema = z.object({
+  id: z.string(),
+  employeeId: z.string(),
+  recordType: employeeLearningTypeSchema,
+  title: z.string(),
+  provider: z.string().nullable().optional(),
+  issueDate: z.string().nullable().optional(),
+  expiryDate: z.string().nullable().optional(),
+  status: employeeLearningStatusSchema,
+  level: employeeLearningLevelSchema.nullable().optional(),
+  notes: z.string().nullable().optional(),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  updatedBy: z.string(),
+});
+export const employeeLearningCreateRequest = z.object({
+  recordType: employeeLearningTypeSchema,
+  title: z.string().min(1).max(300),
+  provider: z.string().max(200).nullable().optional(),
+  issueDate: z.string().nullable().optional(),
+  expiryDate: z.string().nullable().optional(),
+  level: employeeLearningLevelSchema.nullable().optional(),
+  notes: z.string().max(5_000).nullable().optional(),
+});
+export const employeeLearningResponse = z.object({
+  ok: z.literal(true),
+  record: employeeLearningRecordSchema,
+});
+export const employeeLearningListResponse = z.object({
+  items: z.array(employeeLearningRecordSchema),
+  total: z.number().int().nonnegative(),
+});
+
 /**
  * The existing `employeeDetailResponse` (employee/contracts/insurance/audit)
  * is preserved verbatim for backward compatibility. Phase 4A adds optional
  * fields on the SAME response when the caller is signed in.
+ *
+ * Phase 10 — extended with timeline / activities / compensation / learning.
+ * Older clients ignore unknown fields (zod .passthrough is not used; clients
+ * call .parse which is loose by default in our pipeline).
  */
 export const employee360Response = z.object({
   employee: employeeSchema,
@@ -855,6 +1007,11 @@ export const employee360Response = z.object({
   transactions: z.array(employeeTransactionSchema),
   audit: z.array(auditEventSchema),
   dataQuality: employeeDataQualityReportSchema.optional(),
+  // Phase 10 additions — always present (possibly empty arrays).
+  timeline: z.array(employeeTimelineEntrySchema).optional(),
+  activities: z.array(employeeActivitySchema).optional(),
+  compensation: z.array(employeeCompensationLineSchema).optional(),
+  learning: z.array(employeeLearningRecordSchema).optional(),
 });
 
 export type EmployeeDocument          = z.infer<typeof employeeDocumentSchema>;
@@ -867,6 +1024,21 @@ export type EmployeeTransactionCreateRequest = z.infer<typeof employeeTransactio
 export type EmployeeTransactionPatchRequest  = z.infer<typeof employeeTransactionPatchRequest>;
 export type EmployeeDataQualityReport = z.infer<typeof employeeDataQualityReportSchema>;
 export type Employee360Response       = z.infer<typeof employee360Response>;
+
+// Phase 10 — Employee 360 actions
+export type EmployeeTimelineEntry           = z.infer<typeof employeeTimelineEntrySchema>;
+export type EmployeeTimelineEntryCreateRequest = z.infer<typeof employeeTimelineEntryCreateRequest>;
+export type EmployeeTimelineListResponse    = z.infer<typeof employeeTimelineListResponse>;
+export type EmployeeActivity                = z.infer<typeof employeeActivitySchema>;
+export type EmployeeActivityCreateRequest   = z.infer<typeof employeeActivityCreateRequest>;
+export type EmployeeActivityPatchRequest    = z.infer<typeof employeeActivityPatchRequest>;
+export type EmployeeActivityListResponse    = z.infer<typeof employeeActivityListResponse>;
+export type EmployeeCompensationLine        = z.infer<typeof employeeCompensationLineSchema>;
+export type EmployeeCompensationCreateRequest = z.infer<typeof employeeCompensationCreateRequest>;
+export type EmployeeCompensationListResponse= z.infer<typeof employeeCompensationListResponse>;
+export type EmployeeLearningRecord          = z.infer<typeof employeeLearningRecordSchema>;
+export type EmployeeLearningCreateRequest   = z.infer<typeof employeeLearningCreateRequest>;
+export type EmployeeLearningListResponse    = z.infer<typeof employeeLearningListResponse>;
 
 // ---------- inferred types -------------------------------------------------
 
@@ -1275,4 +1447,12 @@ export const API_PATHS = {
   hrConfigDocumentTypes:     '/api/config/document-types',
   hrConfigTransactionTypes:  '/api/config/transaction-types',
   hrConfigActivityTypes:     '/api/config/activity-types',
+  // Phase 10 — Employee 360 action endpoints.
+  employeeTimeline:    (id: string) => `/api/employees/${encodeURIComponent(id)}/timeline`,
+  employeeMessages:    (id: string) => `/api/employees/${encodeURIComponent(id)}/messages`,
+  employeeNotes:       (id: string) => `/api/employees/${encodeURIComponent(id)}/notes`,
+  employeeActivities:  (id: string) => `/api/employees/${encodeURIComponent(id)}/activities`,
+  employeeActivity:    (actId: string) => `/api/employee-activities/${encodeURIComponent(actId)}`,
+  employeeCompensation:(id: string) => `/api/employees/${encodeURIComponent(id)}/compensation`,
+  employeeLearning:    (id: string) => `/api/employees/${encodeURIComponent(id)}/learning`,
 } as const;

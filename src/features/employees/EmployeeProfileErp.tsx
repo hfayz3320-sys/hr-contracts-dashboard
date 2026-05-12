@@ -30,9 +30,9 @@ import * as React from 'react';
 import {
   IdCard, Globe, Mail, ShieldCheck, ShieldAlert, FileText,
   HeartPulse, FolderOpen, ClipboardList, GraduationCap, Wallet,
-  AlertTriangle, MessageSquare, PencilLine, Bell, Upload, Plus, Send,
-  AtSign, Paperclip, ChevronRight, UserPlus,
-  Building2, BadgeCheck, History, Calendar, CheckCircle2,
+  AlertTriangle, MessageSquare, PencilLine, Bell, Upload, Plus,
+  ChevronRight, UserPlus,
+  Building2, BadgeCheck, History as HistoryIcon, Calendar, CheckCircle2,
   ScrollText, User, Gauge, Inbox,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -48,6 +48,11 @@ import type {
   Contract, Insurance, AuditEvent, Employee, EmployeeDocument,
   EmployeeTransaction, EmployeeDataQualityIssue, EmployeeDataQualityReport,
 } from '@shared/domain';
+// Phase 10 — new entity types.
+import type {
+  EmployeeTimelineEntry, EmployeeActivity,
+  EmployeeCompensationLine, EmployeeLearningRecord,
+} from '@shared/api-contract';
 
 import { AliveButton } from '@/components/ui-foundation/AliveButton';
 import { Chip } from '@/components/ui-foundation/Chip';
@@ -58,6 +63,9 @@ import { TabBar } from '@/components/ui-foundation/TabBar';
 import { EmptyState } from '@/components/ui-foundation/EmptyState';
 import { AuditTimeline } from '@/components/common/AuditTimeline';
 import { Link } from 'react-router-dom';
+import { EmployeeActionsHost, type EmployeeActionKey } from './EmployeeActions';
+import { canPerformAdminWrites } from '@/lib/auth';
+import { useMe } from '@/lib/api/use-me';
 
 // ---- Data shape ----------------------------------------------------------
 
@@ -74,6 +82,12 @@ export interface EmployeeProfileErpProps {
   canSeeDataQuality: boolean;
   /** Redacted iqama string (same logic as the default profile). */
   redactedIdentity: string;
+  // Phase 10 — optional collections. Default to empty arrays for older
+  // Worker responses that haven't been redeployed yet.
+  timeline?: EmployeeTimelineEntry[];
+  activities?: EmployeeActivity[];
+  compensation?: EmployeeCompensationLine[];
+  learning?: EmployeeLearningRecord[];
 }
 
 const TABS = [
@@ -89,8 +103,6 @@ const TABS = [
   { key: 'audit',       label: 'Audit Trail'         },
 ] as const;
 type TabKey = typeof TABS[number]['key'];
-
-const A52_TOOLTIP = 'Write actions ship in a later phase';
 
 function initialsFromName(name: string | undefined): string {
   if (!name) return '—';
@@ -108,14 +120,26 @@ function initialsFromName(name: string | undefined): string {
 export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
   const {
     employee: e, contracts, insurance, documents, transactions, audit,
-    dataQuality, isAdmin, canSeeDataQuality, redactedIdentity,
+    dataQuality, canSeeDataQuality, redactedIdentity,
   } = props;
+  // isAdmin is kept on the prop interface for future use; it's not read
+  // here because `canPerformAdminWrites(me)` is the authoritative check.
+  void props.isAdmin;
+  // Phase 10 — default to empty arrays so older worker responses don't crash.
+  const timeline    = props.timeline    ?? [];
+  const activities  = props.activities  ?? [];
+  const compensation= props.compensation?? [];
+  const learning    = props.learning    ?? [];
+
+  const { data: me } = useMe();
+  const canWrite = canPerformAdminWrites(me);
+  const writeTooltip = canWrite ? undefined : 'Only admin users can perform this action.';
 
   const [tab, setTab] = React.useState<TabKey>('summary');
+  const [action, setAction] = React.useState<EmployeeActionKey>(null);
 
   const split = splitContractsByLifecycle(contracts);
   const currentEmployeeNumber = e.employeeNumberHistory.find((h) => h.to == null)?.number ?? null;
-  const activeInsurance = insurance.filter((i) => i.status === 'active').length;
   const reviewIssuesCount = (dataQuality?.issues.length ?? 0) + split.reviewRequired.length;
 
   return (
@@ -138,12 +162,12 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
 
               <div className="flex-1" />
 
-              <AliveButton variant="ghost" size="xs" disabled title={A52_TOOLTIP} icon={<UserPlus className="h-3.5 w-3.5" />}>Create user</AliveButton>
-              <AliveButton variant="ghost" size="xs" disabled title={A52_TOOLTIP} icon={<MessageSquare className="h-3.5 w-3.5" />}>Send message</AliveButton>
-              <AliveButton variant="ghost" size="xs" disabled title={A52_TOOLTIP} icon={<PencilLine className="h-3.5 w-3.5" />}>Log note</AliveButton>
-              <AliveButton variant="ghost" size="xs" disabled title={A52_TOOLTIP} icon={<Bell className="h-3.5 w-3.5" />}>Activity</AliveButton>
-              <AliveButton variant="ghost" size="xs" disabled title={A52_TOOLTIP} icon={<Upload className="h-3.5 w-3.5" />}>Upload</AliveButton>
-              <AliveButton variant="primary" size="xs" disabled title={A52_TOOLTIP} icon={<Plus className="h-3.5 w-3.5" />}>Transaction</AliveButton>
+              <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<UserPlus className="h-3.5 w-3.5" />} onClick={() => setAction('create-user')}>Create user</AliveButton>
+              <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<MessageSquare className="h-3.5 w-3.5" />} onClick={() => setAction('message')}>Send message</AliveButton>
+              <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<PencilLine className="h-3.5 w-3.5" />} onClick={() => setAction('note')}>Log note</AliveButton>
+              <AliveButton variant="ghost" size="xs" disabled={!canWrite} title={writeTooltip} icon={<Bell className="h-3.5 w-3.5" />} onClick={() => setAction('activity')}>Activity</AliveButton>
+              <AliveButton variant="ghost" size="xs" disabled title="Document upload with R2 file binary ships in a follow-up. Metadata-only registration via /admin/import works today." icon={<Upload className="h-3.5 w-3.5" />}>Upload</AliveButton>
+              <AliveButton variant="primary" size="xs" disabled title="Transaction creation from profile ships in a follow-up. POST /api/employees/:id/transactions accepts requests today." icon={<Plus className="h-3.5 w-3.5" />}>Transaction</AliveButton>
             </div>
 
             {/* Identity */}
@@ -190,9 +214,11 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
               <SmartButton count={insurance.length}             label="Insurance"     icon={<HeartPulse className="h-3.5 w-3.5" />}    onClick={() => setTab('insurance')}    active={tab === 'insurance'} />
               <SmartButton count={documents.length}             label="Documents"     icon={<FolderOpen className="h-3.5 w-3.5" />}    onClick={() => setTab('documents')}    active={tab === 'documents'} />
               <SmartButton count={transactions.length}          label="Transactions"  icon={<ClipboardList className="h-3.5 w-3.5" />} onClick={() => setTab('transactions')} active={tab === 'transactions'} />
-              <SmartButton count={split.history.length}         label="History"       icon={<History className="h-3.5 w-3.5" />}       onClick={() => setTab('contracts')} />
+              {/* Phase 10 — real counts from new tables. */}
+              <SmartButton count={activities.length}            label="Activities"    icon={<Bell className="h-3.5 w-3.5" />}          onClick={() => setTab('audit')} />
+              <SmartButton count={compensation.length}          label="Compensation"  icon={<Wallet className="h-3.5 w-3.5" />}        onClick={() => setTab('payroll')}      active={tab === 'payroll'} />
+              <SmartButton count={learning.length}              label="Learning"      icon={<GraduationCap className="h-3.5 w-3.5" />} onClick={() => setTab('learning')}     active={tab === 'learning'} />
               <SmartButton count={reviewIssuesCount}            label="Review"        icon={<AlertTriangle className="h-3.5 w-3.5" />} onClick={() => setTab('audit')}        active={tab === 'audit'} />
-              <SmartButton count={activeInsurance}              label="Active ins."   icon={<ShieldCheck className="h-3.5 w-3.5" />}   onClick={() => setTab('insurance')} />
             </div>
           </div>
 
@@ -216,14 +242,30 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
           {tab === 'insurance'    && <InsuranceSection rows={insurance} />}
           {tab === 'documents'    && <DocumentsSection rows={documents} />}
           {tab === 'transactions' && <TransactionsSection rows={transactions} />}
-          {tab === 'payroll'      && <PayrollSection />}
-          {tab === 'learning'     && <LearningSection />}
+          {tab === 'payroll'      && <PayrollSection lines={compensation} canWrite={canWrite} onAdd={() => setAction('compensation')} />}
+          {tab === 'learning'     && <LearningSection records={learning} canWrite={canWrite} onAdd={() => setAction('learning')} />}
           {tab === 'audit'        && <AuditAndDataQualitySection audit={audit} dq={dataQuality} reviewCount={split.reviewRequired.length} canSee={canSeeDataQuality} />}
         </div>
       </div>
 
-      {/* RIGHT CHATTER PANEL — real audit events, read-only composer */}
-      <ChatterPanel audit={audit} isAdmin={isAdmin} />
+      {/* RIGHT CHATTER PANEL — real audit + timeline + activities feed, with
+          a working composer when the user can write. */}
+      <ChatterPanel
+        audit={audit}
+        timeline={timeline}
+        activities={activities}
+        canWrite={canWrite}
+        onCompose={(kind) => setAction(kind === 'message' ? 'message' : kind === 'note' ? 'note' : 'activity')}
+      />
+
+      {/* Phase 10 — modals for the 6 wired actions. Trans/Doc/Upload remain
+          tooltip-disabled and route through the Import flow today. */}
+      <EmployeeActionsHost
+        employeeId={e.id}
+        employeeName={e.fullName || e.id}
+        open={action}
+        onClose={() => setAction(null)}
+      />
     </div>
   );
 }
@@ -372,7 +414,7 @@ function ContractsLifecycle({ split }: { split: ContractLifecycleSplit }) {
       />
       <ContractRowsPanel
         title="Contract history"
-        icon={<History className="h-4 w-4 text-muted-foreground" />}
+        icon={<HistoryIcon className="h-4 w-4 text-muted-foreground" />}
         tone="default"
         rows={split.history}
         emptyTitle="No history yet"
@@ -570,32 +612,106 @@ function TransactionsSection({ rows }: { rows: EmployeeTransaction[] }) {
   );
 }
 
-function PayrollSection() {
-  // Phase 7A: compensation is configured at the HR-config level but not yet
-  // attached per employee. Honest empty state — no mock numbers.
+function PayrollSection({ lines, canWrite, onAdd }: { lines: EmployeeCompensationLine[]; canWrite: boolean; onAdd: () => void }) {
+  const totalMonthly = lines
+    .filter((l) => l.frequency === 'monthly')
+    .reduce((s, l) => s + l.amount, 0);
   return (
-    <Panel title="Payroll / Compensation">
-      <EmptyState
-        icon={Wallet}
-        tone="info"
-        title="Compensation not configured"
-        description="Payroll components are seeded in HR config (basic, housing, transport, etc.), but per-employee compensation lines are not yet wired. This tab will populate once compensation entry ships."
-      />
+    <Panel
+      title="Payroll / Compensation"
+      action={
+        canWrite ? (
+          <AliveButton variant="primary" size="xs" icon={<Plus className="h-3.5 w-3.5" />} onClick={onAdd}>
+            Add line
+          </AliveButton>
+        ) : undefined
+      }
+    >
+      {lines.length === 0 ? (
+        <EmptyState
+          icon={Wallet}
+          tone="info"
+          title="No compensation lines yet"
+          description={canWrite
+            ? 'Add a basic salary, allowance, or deduction to get started.'
+            : 'Admin can add components from the profile actions.'}
+        />
+      ) : (
+        <div>
+          <ul className="divide-y">
+            {lines.map((l) => (
+              <li key={l.id} className="flex items-center gap-3 py-2.5">
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13px] font-medium">{l.componentName}</div>
+                  <div className="text-[11px] text-muted-foreground tabular-nums">
+                    <span className="font-mono">{l.componentCode}</span> · effective {l.effectiveFrom}
+                    {l.effectiveTo ? ` → ${l.effectiveTo}` : ' →'}
+                  </div>
+                </div>
+                <div className="text-right tabular-nums">
+                  <div className="text-[13px] font-semibold">{l.currency} {l.amount.toLocaleString()}</div>
+                  <div className="text-[10.5px] text-muted-foreground uppercase tracking-wide">{l.frequency.replace('_', ' ')}</div>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {totalMonthly > 0 && (
+            <div className="mt-2 pt-2 border-t flex justify-between text-[12px] font-medium">
+              <span className="text-muted-foreground">Monthly total</span>
+              <span className="tabular-nums">SAR {totalMonthly.toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+      )}
     </Panel>
   );
 }
 
-function LearningSection() {
-  // Phase 7A: learning categories are configured but learning records are
-  // not yet a wired entity. Honest empty state — no mock skills.
+function LearningSection({ records, canWrite, onAdd }: { records: EmployeeLearningRecord[]; canWrite: boolean; onAdd: () => void }) {
   return (
-    <Panel title="Learning / Experience">
-      <EmptyState
-        icon={GraduationCap}
-        tone="info"
-        title="No learning records yet"
-        description="Certifications, training, skills, and prior experience will appear here. Tracking ships in a later phase."
-      />
+    <Panel
+      title="Learning / Experience"
+      action={
+        canWrite ? (
+          <AliveButton variant="primary" size="xs" icon={<Plus className="h-3.5 w-3.5" />} onClick={onAdd}>
+            Add record
+          </AliveButton>
+        ) : undefined
+      }
+    >
+      {records.length === 0 ? (
+        <EmptyState
+          icon={GraduationCap}
+          tone="info"
+          title="No learning records yet"
+          description={canWrite
+            ? 'Add a certification, training, skill, or prior experience entry.'
+            : 'Admin can add learning records from the profile actions.'}
+        />
+      ) : (
+        <ul className="divide-y">
+          {records.map((r) => (
+            <li key={r.id} className="flex items-start gap-3 py-2.5">
+              <GraduationCap className="h-4 w-4 text-muted-foreground mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium">{r.title}</div>
+                <div className="text-[11px] text-muted-foreground tabular-nums">
+                  <span className="capitalize">{r.recordType}</span>
+                  {r.provider ? ` · ${r.provider}` : ''}
+                  {r.issueDate ? ` · since ${r.issueDate}` : ''}
+                  {r.expiryDate ? ` → ${r.expiryDate}` : ''}
+                </div>
+              </div>
+              <Chip
+                tone={r.status === 'active' ? 'active' : r.status === 'expiring' ? 'expiring' : r.status === 'expired' ? 'expired' : 'default'}
+              >
+                {r.status}
+              </Chip>
+            </li>
+          ))}
+        </ul>
+      )}
     </Panel>
   );
 }
@@ -677,84 +793,145 @@ function AuditAndDataQualitySection({
 // Right chatter panel — REAL audit events, composer DISABLED
 // ============================================================
 
-function ChatterPanel({ audit, isAdmin }: { audit: AuditEvent[]; isAdmin: boolean }) {
-  const [composer, setComposer] = React.useState<'message' | 'note' | 'activity'>('message');
+function ChatterPanel({
+  audit, timeline, activities, canWrite, onCompose,
+}: {
+  audit: AuditEvent[];
+  timeline: EmployeeTimelineEntry[];
+  activities: EmployeeActivity[];
+  canWrite: boolean;
+  onCompose: (kind: 'message' | 'note' | 'activity') => void;
+}) {
+  // Phase 10 — merge real audit + timeline + activities into a single feed,
+  // newest first. Each kind has its own visual style but shares the layout.
+  type FeedItem =
+    | { kind: 'audit';    at: string; row: AuditEvent }
+    | { kind: 'message';  at: string; row: EmployeeTimelineEntry }
+    | { kind: 'note';     at: string; row: EmployeeTimelineEntry }
+    | { kind: 'activity'; at: string; row: EmployeeActivity };
+  const feed: FeedItem[] = [];
+  for (const a of audit) feed.push({ kind: 'audit', at: a.at, row: a });
+  for (const t of timeline) feed.push({ kind: t.entryType, at: t.createdAt, row: t });
+  for (const a of activities) feed.push({ kind: 'activity', at: a.createdAt, row: a });
+  feed.sort((a, b) => b.at.localeCompare(a.at));
+  const total = feed.length;
+
+  const writeTooltip = canWrite ? undefined : 'Only admin users can post here.';
 
   return (
     <aside className="border-l bg-card flex flex-col min-h-0 xl:sticky xl:top-0 xl:max-h-screen xl:overflow-hidden">
       <header className="px-4 py-3 border-b flex items-center gap-2">
         <h3 className="text-[12px] font-semibold uppercase tracking-[0.06em] flex-1">Activity</h3>
-        <span className="text-[10.5px] text-muted-foreground tabular-nums">{audit.length}</span>
+        <span className="text-[10.5px] text-muted-foreground tabular-nums">{total}</span>
       </header>
 
-      {/* Disabled composer — POST not wired yet */}
-      <div className="px-4 pt-3 border-b">
+      {/* Composer triggers — open the matching modal on click. */}
+      <div className="px-4 pt-3 pb-3 border-b">
         <div className="flex items-center gap-1 text-[12px]">
-          {[
-            { key: 'message',  label: 'Send Message', icon: MessageSquare },
-            { key: 'note',     label: 'Log Note',     icon: PencilLine },
-            { key: 'activity', label: 'Activity',     icon: Bell },
-          ].map((t) => {
-            const sel = composer === t.key;
-            const Icon = t.icon;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                onClick={() => setComposer(t.key as typeof composer)}
-                aria-pressed={sel}
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-2.5 h-7 rounded-md font-medium',
-                  'transition-[background-color,color,transform] duration-fast ease-out-quart',
-                  'active:translate-y-[1px] active:duration-75',
-                  sel ? 'bg-foreground text-background' : 'text-muted-foreground hover:text-foreground hover:bg-muted',
-                )}
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {t.label}
-              </button>
-            );
-          })}
+          <AliveButton
+            variant="secondary"
+            size="xs"
+            disabled={!canWrite}
+            title={writeTooltip}
+            icon={<MessageSquare className="h-3.5 w-3.5" />}
+            onClick={() => onCompose('message')}
+          >
+            Send Message
+          </AliveButton>
+          <AliveButton
+            variant="secondary"
+            size="xs"
+            disabled={!canWrite}
+            title={writeTooltip}
+            icon={<PencilLine className="h-3.5 w-3.5" />}
+            onClick={() => onCompose('note')}
+          >
+            Log Note
+          </AliveButton>
+          <AliveButton
+            variant="secondary"
+            size="xs"
+            disabled={!canWrite}
+            title={writeTooltip}
+            icon={<Bell className="h-3.5 w-3.5" />}
+            onClick={() => onCompose('activity')}
+          >
+            Activity
+          </AliveButton>
         </div>
-        <div
-          className="mt-3 mb-3 rounded-md border bg-muted/30 cursor-not-allowed"
-          title={A52_TOOLTIP}
-        >
-          <textarea
-            rows={2}
-            disabled
-            placeholder={`Compose a ${composer}… (write actions ship in a later phase)`}
-            className="w-full bg-transparent text-[12.5px] px-3 py-2 resize-none focus:outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
-          />
-          <div className="flex items-center gap-1 px-2 py-1.5 border-t">
-            <button disabled title={A52_TOOLTIP} className="h-7 w-7 rounded inline-flex items-center justify-center text-muted-foreground/60 cursor-not-allowed">
-              <Paperclip className="h-3.5 w-3.5" />
-            </button>
-            <button disabled title={A52_TOOLTIP} className="h-7 w-7 rounded inline-flex items-center justify-center text-muted-foreground/60 cursor-not-allowed">
-              <AtSign className="h-3.5 w-3.5" />
-            </button>
-            <div className="flex-1" />
-            <AliveButton variant="primary" size="xs" disabled title={A52_TOOLTIP} icon={<Send className="h-3.5 w-3.5" />}>Send</AliveButton>
-          </div>
-        </div>
-        <p className="text-[10.5px] text-muted-foreground mb-3">
-          {isAdmin
-            ? 'Composer is read-only — write endpoints land in a later phase.'
-            : 'Only admins / HR managers can post here.'}
-        </p>
+        {!canWrite && (
+          <p className="mt-2 text-[10.5px] text-muted-foreground">
+            Only admin users can post here.
+          </p>
+        )}
       </div>
 
-      {/* Real audit feed */}
+      {/* Real merged feed: audit + timeline + activities, newest first. */}
       <ol className="flex-1 overflow-auto px-4 py-3 space-y-3 min-h-[300px]">
-        {audit.length === 0 ? (
+        {total === 0 ? (
           <li className="text-[12px] text-muted-foreground text-center py-8">
-            No activity yet. Every change to this employee will appear here.
+            No activity yet. Every change, message, note, and scheduled task appears here.
           </li>
         ) : (
-          audit.slice(0, 50).map((entry) => <ChatterEntry key={entry.id} entry={entry} />)
+          feed.slice(0, 50).map((item) => <FeedRow key={`${item.kind}-${item.row.id}`} item={item} />)
         )}
       </ol>
     </aside>
+  );
+}
+
+function FeedRow({ item }: { item:
+  | { kind: 'audit';    at: string; row: AuditEvent }
+  | { kind: 'message';  at: string; row: EmployeeTimelineEntry }
+  | { kind: 'note';     at: string; row: EmployeeTimelineEntry }
+  | { kind: 'activity'; at: string; row: EmployeeActivity } }) {
+  if (item.kind === 'audit') return <ChatterEntry entry={item.row} />;
+  if (item.kind === 'activity') {
+    return (
+      <li className="flex items-start gap-3">
+        <span aria-hidden="true" className="h-7 w-7 rounded-full flex items-center justify-center shrink-0 bg-status-info-soft text-[hsl(var(--status-info))]">
+          <Bell className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-[12px] font-semibold truncate">{item.row.createdBy}</span>
+            <span className="text-[10.5px] text-muted-foreground tabular-nums ml-auto">{item.at.slice(0, 16).replace('T', ' ')}</span>
+          </div>
+          <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+            <Chip tone={item.row.status === 'done' ? 'active' : item.row.status === 'cancelled' ? 'expired' : 'info'}>
+              {item.row.activityType.replace('_', ' ')} · {item.row.status}
+            </Chip>
+            {item.row.dueDate && <Chip tone="default">due {item.row.dueDate}</Chip>}
+          </div>
+          <p className="mt-1 text-[12.5px] leading-snug">{item.row.title}</p>
+          {item.row.description && (
+            <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground line-clamp-3">{item.row.description}</p>
+          )}
+        </div>
+      </li>
+    );
+  }
+  // message / note
+  const isNote = item.kind === 'note';
+  return (
+    <li className="flex items-start gap-3">
+      <span aria-hidden="true" className={cn(
+        'h-7 w-7 rounded-full flex items-center justify-center shrink-0',
+        isNote ? 'bg-muted text-muted-foreground' : 'bg-primary/15 text-primary',
+      )}>
+        {isNote ? <PencilLine className="h-3.5 w-3.5" /> : <MessageSquare className="h-3.5 w-3.5" />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className="text-[12px] font-semibold truncate">{item.row.createdBy}</span>
+          <span className="text-[10.5px] text-muted-foreground tabular-nums ml-auto">{item.at.slice(0, 16).replace('T', ' ')}</span>
+        </div>
+        <div className="mt-1">
+          <Chip tone={isNote ? 'default' : 'info'}>{isNote ? 'note' : 'message'}</Chip>
+        </div>
+        <p className="mt-1 text-[12.5px] leading-snug whitespace-pre-wrap">{item.row.body}</p>
+      </div>
+    </li>
   );
 }
 

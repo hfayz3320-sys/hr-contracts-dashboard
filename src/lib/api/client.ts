@@ -44,6 +44,15 @@ import {
   contractPatchResponse,
   appUserPatchResponse,
   debugCountsResponse,
+  // Phase 10 — Employee 360 action response shapes.
+  employeeTimelineListResponse,
+  employeeTimelineEntryCreateResponse,
+  employeeActivityListResponse,
+  employeeActivityResponse,
+  employeeCompensationListResponse,
+  employeeCompensationResponse,
+  employeeLearningListResponse,
+  employeeLearningResponse,
 } from '@shared/api-contract';
 import type { z } from 'zod';
 import type {
@@ -60,6 +69,11 @@ import type {
   appUserDeactivateRequest,
   reviewApproveRequest,
   reviewRejectRequest,
+  employeeTimelineEntryCreateRequest,
+  employeeActivityCreateRequest,
+  employeeActivityPatchRequest,
+  employeeCompensationCreateRequest,
+  employeeLearningCreateRequest,
 } from '@shared/api-contract';
 import { adminHeaders } from './admin';
 
@@ -350,4 +364,55 @@ export const api = {
   // Phase 3A — admin debug counts (DB + schema-health probes).
   debugCounts: () =>
     request(debugCountsResponse, API_PATHS.debugCounts, { admin: true }),
+  // ====================================================================
+  // Phase 10 — Employee 360 action endpoints
+  // ====================================================================
+  // Timeline (messages + notes)
+  employeeTimeline: (id: string) =>
+    request(employeeTimelineListResponse, API_PATHS.employeeTimeline(id)),
+  createEmployeeMessage: (id: string, payload: z.infer<typeof employeeTimelineEntryCreateRequest>) =>
+    request(employeeTimelineEntryCreateResponse, API_PATHS.employeeMessages(id), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  createEmployeeNote: (id: string, payload: z.infer<typeof employeeTimelineEntryCreateRequest>) =>
+    request(employeeTimelineEntryCreateResponse, API_PATHS.employeeNotes(id), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  // Activities
+  employeeActivities: (id: string) =>
+    request(employeeActivityListResponse, API_PATHS.employeeActivities(id)),
+  createEmployeeActivity: (id: string, payload: z.infer<typeof employeeActivityCreateRequest>) =>
+    request(employeeActivityResponse, API_PATHS.employeeActivities(id), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  patchEmployeeActivity: (actId: string, payload: z.infer<typeof employeeActivityPatchRequest>) =>
+    request(employeeActivityResponse, API_PATHS.employeeActivity(actId), {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  // Compensation
+  employeeCompensation: (id: string) =>
+    request(employeeCompensationListResponse, API_PATHS.employeeCompensation(id)),
+  createEmployeeCompensation: (id: string, payload: z.infer<typeof employeeCompensationCreateRequest>) =>
+    request(employeeCompensationResponse, API_PATHS.employeeCompensation(id), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
+  // Learning
+  employeeLearning: (id: string) =>
+    request(employeeLearningListResponse, API_PATHS.employeeLearning(id)),
+  createEmployeeLearning: (id: string, payload: z.infer<typeof employeeLearningCreateRequest>) =>
+    request(employeeLearningResponse, API_PATHS.employeeLearning(id), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      admin: true,
+    }),
 };

@@ -14,6 +14,12 @@ import type {
   AppUserDeactivateRequest,
   ReviewApproveRequest,
   ReviewRejectRequest,
+  // Phase 10 — Employee 360 action create/patch requests.
+  EmployeeTimelineEntryCreateRequest,
+  EmployeeActivityCreateRequest,
+  EmployeeActivityPatchRequest,
+  EmployeeCompensationCreateRequest,
+  EmployeeLearningCreateRequest,
 } from '@shared/api-contract';
 
 export const queryKeys = {
@@ -271,6 +277,71 @@ export function useReviewReject() {
   return useMutation({
     mutationFn: (args: { id: string; payload: ReviewRejectRequest }) =>
       api.reviewReject(args.id, args.payload),
+    onSuccess: () => invalidate(),
+  });
+}
+
+// ============================================================================
+// Phase 10 — Employee 360 action mutations.
+// Each mutation invalidates the matching Employee 360 query so the profile
+// updates immediately after a write succeeds.
+// ============================================================================
+
+function useEmp360Invalidator(employeeId: string) {
+  const qc = useQueryClient();
+  return () => qc.invalidateQueries({ queryKey: queryKeys.employee360(employeeId) });
+}
+
+export function useCreateEmployeeMessage(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (payload: EmployeeTimelineEntryCreateRequest) =>
+      api.createEmployeeMessage(employeeId, payload),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useCreateEmployeeNote(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (payload: EmployeeTimelineEntryCreateRequest) =>
+      api.createEmployeeNote(employeeId, payload),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useCreateEmployeeActivity(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (payload: EmployeeActivityCreateRequest) =>
+      api.createEmployeeActivity(employeeId, payload),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function usePatchEmployeeActivity(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (args: { activityId: string; payload: EmployeeActivityPatchRequest }) =>
+      api.patchEmployeeActivity(args.activityId, args.payload),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useCreateEmployeeCompensation(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (payload: EmployeeCompensationCreateRequest) =>
+      api.createEmployeeCompensation(employeeId, payload),
+    onSuccess: () => invalidate(),
+  });
+}
+
+export function useCreateEmployeeLearning(employeeId: string) {
+  const invalidate = useEmp360Invalidator(employeeId);
+  return useMutation({
+    mutationFn: (payload: EmployeeLearningCreateRequest) =>
+      api.createEmployeeLearning(employeeId, payload),
     onSuccess: () => invalidate(),
   });
 }
