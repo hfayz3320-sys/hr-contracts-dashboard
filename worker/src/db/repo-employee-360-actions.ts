@@ -30,6 +30,9 @@ interface TimelineRow {
   created_at: string;
   updated_at: string;
   updated_by: string;
+  // Migration 0008 added this column. Pre-0008 environments simply omit it;
+  // we coalesce to undefined in the route layer.
+  idempotency_key?: string | null;
 }
 
 function rowToTimeline(r: TimelineRow): EmployeeTimelineEntry {
@@ -53,18 +56,55 @@ export async function listTimelineForEmployee(env: Env, employeeId: string): Pro
   return (rows.results ?? []).map(rowToTimeline);
 }
 
+/**
+ * Idempotency lookup. Returns the existing entry if a previous request with
+ * the same `Idempotency-Key` already created one. Migration 0008 added the
+ * column + a UNIQUE-WHERE-NOT-NULL index; on pre-migration databases the
+ * query throws `no such column`, which the route layer catches and treats
+ * as "no idempotency support, fall through to insert".
+ */
+export async function findTimelineEntryByIdempotencyKey(
+  env: Env,
+  employeeId: string,
+  idempotencyKey: string,
+): Promise<EmployeeTimelineEntry | null> {
+  const r = await env.DB
+    .prepare(
+      `SELECT * FROM employee_timeline_entries
+       WHERE employee_id = ? AND idempotency_key = ?
+       LIMIT 1`,
+    )
+    .bind(employeeId, idempotencyKey)
+    .first<TimelineRow>();
+  return r ? rowToTimeline(r) : null;
+}
+
 export async function insertTimelineEntry(
   env: Env,
   id: string,
-  input: { employeeId: string; entryType: 'message' | 'note'; body: string; actor: string },
+  input: {
+    employeeId: string;
+    entryType: 'message' | 'note';
+    body: string;
+    actor: string;
+    idempotencyKey?: string | null;
+  },
 ): Promise<EmployeeTimelineEntry> {
   await env.DB
     .prepare(
       `INSERT INTO employee_timeline_entries
-         (id, employee_id, entry_type, body, created_by, created_at, updated_at, updated_by)
-       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?)`,
+         (id, employee_id, entry_type, body, created_by, created_at, updated_at, updated_by, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), ?, ?)`,
     )
-    .bind(id, input.employeeId, input.entryType, input.body, input.actor, input.actor)
+    .bind(
+      id,
+      input.employeeId,
+      input.entryType,
+      input.body,
+      input.actor,
+      input.actor,
+      input.idempotencyKey ?? null,
+    )
     .run();
   const r = await env.DB
     .prepare(`SELECT * FROM employee_timeline_entries WHERE id = ?`)

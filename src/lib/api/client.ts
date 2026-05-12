@@ -373,17 +373,27 @@ export const api = {
   // Timeline (messages + notes)
   employeeTimeline: (id: string) =>
     request(employeeTimelineListResponse, API_PATHS.employeeTimeline(id)),
-  createEmployeeMessage: (id: string, payload: z.infer<typeof employeeTimelineEntryCreateRequest>) =>
+  createEmployeeMessage: (
+    id: string,
+    payload: z.infer<typeof employeeTimelineEntryCreateRequest>,
+    opts: { idempotencyKey?: string } = {},
+  ) =>
     request(employeeTimelineEntryCreateResponse, API_PATHS.employeeMessages(id), {
       method: 'POST',
       body: JSON.stringify(payload),
       admin: true,
+      ...(opts.idempotencyKey ? { headers: { 'Idempotency-Key': opts.idempotencyKey } } : {}),
     }),
-  createEmployeeNote: (id: string, payload: z.infer<typeof employeeTimelineEntryCreateRequest>) =>
+  createEmployeeNote: (
+    id: string,
+    payload: z.infer<typeof employeeTimelineEntryCreateRequest>,
+    opts: { idempotencyKey?: string } = {},
+  ) =>
     request(employeeTimelineEntryCreateResponse, API_PATHS.employeeNotes(id), {
       method: 'POST',
       body: JSON.stringify(payload),
       admin: true,
+      ...(opts.idempotencyKey ? { headers: { 'Idempotency-Key': opts.idempotencyKey } } : {}),
     }),
   // Activities
   employeeActivities: (id: string) =>
@@ -483,4 +493,54 @@ export const api = {
       body: JSON.stringify(payload),
       admin: true,
     }),
+  // ====================================================================
+  // Phase 10 hotfix — authenticated file download via private R2.
+  // Returns a Blob the caller can either turn into an object URL for an
+  // <iframe> preview or feed straight to an anchor click for save-to-disk.
+  // ====================================================================
+  /**
+   * Fetch a contract PDF as a Blob. Cookie-based CF Access auth in prod;
+   * X-Dev-Admin-Email in dev. Throws on non-2xx.
+   */
+  fetchContractFile: async (id: string, opts: { download?: boolean } = {}) => {
+    if (!API_BASE_URL && import.meta.env.DEV) {
+      throw new ApiUnavailableError('VITE_API_BASE_URL is not set');
+    }
+    const qs = opts.download ? '?download=1' : '';
+    const url = `${API_BASE_URL}${API_PATHS.contractFile(id)}${qs}`;
+    const res = await fetch(url, { headers: adminHeaders() });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const body = await res.json() as { message?: string };
+        if (body?.message) msg = body.message;
+      } catch { /* ignore */ }
+      throw new Error(`Contract file ${id} → ${res.status}: ${msg}`);
+    }
+    return res.blob();
+  },
+  /**
+   * Fetch an employee document file as a Blob (any type — PDF, image, doc).
+   */
+  fetchEmployeeDocumentFile: async (
+    employeeId: string,
+    docId: string,
+    opts: { download?: boolean } = {},
+  ) => {
+    if (!API_BASE_URL && import.meta.env.DEV) {
+      throw new ApiUnavailableError('VITE_API_BASE_URL is not set');
+    }
+    const qs = opts.download ? '?download=1' : '';
+    const url = `${API_BASE_URL}${API_PATHS.employeeDocumentFile(employeeId, docId)}${qs}`;
+    const res = await fetch(url, { headers: adminHeaders() });
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`;
+      try {
+        const body = await res.json() as { message?: string };
+        if (body?.message) msg = body.message;
+      } catch { /* ignore */ }
+      throw new Error(`Document ${docId} → ${res.status}: ${msg}`);
+    }
+    return res.blob();
+  },
 };

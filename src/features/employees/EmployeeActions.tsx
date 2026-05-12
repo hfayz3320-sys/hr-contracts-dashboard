@@ -91,19 +91,35 @@ function MessageOrNoteModal({
   employeeName: string;
 }) {
   const [body, setBody] = React.useState('');
+  // A single idempotency key per modal-open session. Worker uses this to
+  // de-duplicate POSTs (double-click, React Query retry, strict-mode
+  // double-fire). Regenerated whenever the modal re-opens so a second
+  // separate compose creates a real second row.
+  const [idempotencyKey, setIdempotencyKey] = React.useState<string>('');
   const messageMut = useCreateEmployeeMessage(employeeId);
   const noteMut = useCreateEmployeeNote(employeeId);
   const mut = kind === 'message' ? messageMut : noteMut;
 
-  React.useEffect(() => { if (open) setBody(''); }, [open]);
+  React.useEffect(() => {
+    if (open) {
+      setBody('');
+      // crypto.randomUUID is available in all the browsers we target.
+      setIdempotencyKey(crypto.randomUUID());
+    }
+  }, [open]);
 
   async function submit() {
-    if (!body.trim()) return;
+    if (!body.trim() || mut.isPending) return;
     try {
-      await mut.mutateAsync({ body: body.trim() });
-      toast.success(kind === 'message' ? 'Message sent' : 'Note logged', {
-        description: `Saved to ${employeeName}'s timeline.`,
-      });
+      const res = await mut.mutateAsync({ body: body.trim(), idempotencyKey });
+      // If the worker reports `replayed`, the server saw the same key
+      // before — the toast on the FIRST request already told the user
+      // about it, so we stay silent on the replay to avoid toast spam.
+      if (!('replayed' in res && res.replayed)) {
+        toast.success(kind === 'message' ? 'Message sent' : 'Note logged', {
+          description: `Saved to ${employeeName}'s timeline.`,
+        });
+      }
       onClose();
     } catch (err) {
       toast.error('Could not save', { description: err instanceof Error ? err.message : 'Unknown error' });

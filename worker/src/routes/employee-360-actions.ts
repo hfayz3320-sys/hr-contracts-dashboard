@@ -30,6 +30,7 @@ import { getEmployee } from '../db/repo-employees';
 import {
   listTimelineForEmployee,
   insertTimelineEntry,
+  findTimelineEntryByIdempotencyKey,
   listActivitiesForEmployee,
   getActivity,
   insertActivity,
@@ -85,13 +86,51 @@ async function postTimeline(c: Parameters<Parameters<typeof employee360ActionsRo
     return c.json({ error: 'BAD_REQUEST', message: 'Invalid request', issues: parsed.error.issues }, 400);
   }
   const actor = (await getActorEmail(c)) ?? 'unknown';
+
+  // Idempotency. Caller passes `Idempotency-Key` per modal-open session;
+  // double-click / strict-mode double-fire / network retry all share the
+  // same key, so the second request is a no-op (returns the existing row).
+  //
+  // Pre-migration-0008 databases lack the `idempotency_key` column. The
+  // lookup throws "no such column"; we catch it and degrade to non-
+  // idempotent insert so older deploys keep working.
+  const idempotencyKey = c.req.header('Idempotency-Key') ?? null;
+  if (idempotencyKey) {
+    try {
+      const existing = await findTimelineEntryByIdempotencyKey(c.env, id, idempotencyKey);
+      if (existing) {
+        // No audit on replay — the original request already wrote one.
+        return c.json({ ok: true as const, entry: existing, replayed: true as const });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/no such column/i.test(msg)) throw err;
+    }
+  }
+
   const newRowId = newId(entryType === 'message' ? 'msg' : 'nte');
-  const entry = await insertTimelineEntry(c.env, newRowId, {
-    employeeId: id,
-    entryType,
-    body: parsed.data.body,
-    actor,
-  });
+  let entry;
+  try {
+    entry = await insertTimelineEntry(c.env, newRowId, {
+      employeeId: id,
+      entryType,
+      body: parsed.data.body,
+      actor,
+      idempotencyKey,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Race: a sibling request claimed the same idempotency key between our
+    // lookup and our insert. The UNIQUE-WHERE-NOT-NULL index throws on
+    // conflict — re-read the existing row and return it.
+    if (idempotencyKey && /UNIQUE constraint failed/i.test(msg)) {
+      const existing = await findTimelineEntryByIdempotencyKey(c.env, id, idempotencyKey);
+      if (existing) {
+        return c.json({ ok: true as const, entry: existing, replayed: true as const });
+      }
+    }
+    throw err;
+  }
   await writeAudit(c.env, {
     actor,
     action: entryType === 'message' ? 'employee.message' : 'employee.note',

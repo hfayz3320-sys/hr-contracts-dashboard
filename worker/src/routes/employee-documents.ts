@@ -38,6 +38,7 @@ import {
   employeeDocumentPatchRequest,
   employeeDocumentTypeSchema,
 } from '@shared/api-contract';
+import { streamR2Object } from '../lib/r2-stream';
 
 export const employeeDocumentRoutes = new Hono<AppContext>();
 
@@ -214,6 +215,83 @@ employeeDocumentRoutes.patch(
     });
 
     return c.json({ ok: true as const, document: after });
+  },
+);
+
+// ---- DOWNLOAD / VIEW ------------------------------------------------------
+//
+// GET /api/employees/:id/documents/:docId/file
+//
+// Streams the raw bytes of an uploaded employee document from the private
+// R2 bucket back through the authenticated API. Query string:
+//   ?download=1 → Content-Disposition: attachment (browser save dialog)
+//
+// The R2 key is read from `employee_documents.metadata.r2ObjectKey` (set by
+// the upload endpoint). Returns 404 when:
+//   - document not found
+//   - document.employeeId mismatches the path param (defense in depth so a
+//     valid docId can't be retrieved against a wrong employee scope)
+//   - metadata.r2ObjectKey is missing (legacy / hand-entered metadata-only row)
+//   - the R2 object is missing
+//
+// Audit: every access writes `employee_document.file_access`.
+employeeDocumentRoutes.get(
+  '/api/employees/:id/documents/:docId/file',
+  async (c) => {
+    const id = c.req.param('id');
+    const docId = c.req.param('docId');
+    if (!id || !docId) {
+      return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
+    }
+    const doc = await getDocumentById(c.env, docId);
+    if (!doc || doc.employeeId !== id) {
+      return c.json(
+        { error: 'NOT_FOUND', message: `Document ${docId} not found for employee ${id}` },
+        404,
+      );
+    }
+    const r2Key =
+      typeof doc.metadata?.['r2ObjectKey'] === 'string'
+        ? (doc.metadata['r2ObjectKey'] as string)
+        : null;
+    const originalFilename =
+      typeof doc.metadata?.['originalFilename'] === 'string'
+        ? (doc.metadata['originalFilename'] as string)
+        : null;
+    const contentTypeMeta =
+      typeof doc.metadata?.['contentType'] === 'string'
+        ? (doc.metadata['contentType'] as string)
+        : null;
+    if (!r2Key) {
+      return c.json(
+        { error: 'NOT_FOUND', message: 'Document has no R2 object (metadata-only row)' },
+        404,
+      );
+    }
+
+    const wantDownload = c.req.query('download') === '1';
+    const result = await streamR2Object(c.env, r2Key, {
+      filename: originalFilename ?? `${doc.type}.bin`,
+      forceDownload: wantDownload,
+      contentTypeOverride: contentTypeMeta,
+    });
+    if (result.kind === 'not_found') {
+      return c.json({ error: 'NOT_FOUND', message: 'R2 object missing' }, 404);
+    }
+    if (result.kind === 'forbidden_path') {
+      return c.json({ error: 'FORBIDDEN', message: 'Refusing to stream a public path' }, 403);
+    }
+
+    const actor = (await getActorEmail(c)) ?? 'unknown';
+    await writeAudit(c.env, {
+      actor,
+      action: 'employee_document.file_access',
+      target: docId,
+      status: 'ok',
+      details: `${wantDownload ? 'downloaded' : 'viewed'} ${doc.type} document for employee ${id} · r2:${r2Key}`,
+    });
+
+    return result.response;
   },
 );
 

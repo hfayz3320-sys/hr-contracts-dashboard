@@ -293,11 +293,25 @@ function useEmp360Invalidator(employeeId: string) {
   return () => qc.invalidateQueries({ queryKey: queryKeys.employee360(employeeId) });
 }
 
+/**
+ * `payload` may include a top-level `idempotencyKey` — it is stripped out
+ * of the request body and forwarded as an `Idempotency-Key` HTTP header.
+ * The worker uses that header to deduplicate double-click / strict-mode /
+ * fetch-retry repeats of the same logical write (see migration 0008).
+ */
+type WithIdempotency<T> = T & { idempotencyKey?: string };
+function splitIdempotency<T>(p: WithIdempotency<T>): { body: T; idempotencyKey?: string } {
+  const { idempotencyKey, ...body } = p;
+  return idempotencyKey ? { body: body as T, idempotencyKey } : { body: body as T };
+}
+
 export function useCreateEmployeeMessage(employeeId: string) {
   const invalidate = useEmp360Invalidator(employeeId);
   return useMutation({
-    mutationFn: (payload: EmployeeTimelineEntryCreateRequest) =>
-      api.createEmployeeMessage(employeeId, payload),
+    mutationFn: (payload: WithIdempotency<EmployeeTimelineEntryCreateRequest>) => {
+      const { body, idempotencyKey } = splitIdempotency(payload);
+      return api.createEmployeeMessage(employeeId, body, idempotencyKey ? { idempotencyKey } : {});
+    },
     onSuccess: () => invalidate(),
   });
 }
@@ -305,8 +319,10 @@ export function useCreateEmployeeMessage(employeeId: string) {
 export function useCreateEmployeeNote(employeeId: string) {
   const invalidate = useEmp360Invalidator(employeeId);
   return useMutation({
-    mutationFn: (payload: EmployeeTimelineEntryCreateRequest) =>
-      api.createEmployeeNote(employeeId, payload),
+    mutationFn: (payload: WithIdempotency<EmployeeTimelineEntryCreateRequest>) => {
+      const { body, idempotencyKey } = splitIdempotency(payload);
+      return api.createEmployeeNote(employeeId, body, idempotencyKey ? { idempotencyKey } : {});
+    },
     onSuccess: () => invalidate(),
   });
 }

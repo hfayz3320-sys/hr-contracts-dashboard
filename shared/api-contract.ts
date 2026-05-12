@@ -894,9 +894,19 @@ export const employeeTimelineEntrySchema = z.object({
 export const employeeTimelineEntryCreateRequest = z.object({
   body: z.string().min(1).max(10_000),
 });
+/**
+ * Response shape for POST /api/employees/:id/{messages,notes}.
+ *
+ * `replayed` is set when the worker observed an `Idempotency-Key` header
+ * that matched a previously-stored row — the returned `entry` is the
+ * original row, no new insert happened, no fresh audit row was written.
+ * The FE may use the field to suppress the success toast on replay so a
+ * stuck user clicking five times only sees one notification.
+ */
 export const employeeTimelineEntryCreateResponse = z.object({
   ok: z.literal(true),
   entry: employeeTimelineEntrySchema,
+  replayed: z.boolean().optional(),
 });
 export const employeeTimelineListResponse = z.object({
   items: z.array(employeeTimelineEntrySchema),
@@ -1465,6 +1475,10 @@ export const API_PATHS = {
   // Phase 10 — multipart upload of a raw document file to R2 (private bucket)
   // with metadata persisted to employee_documents in a single transaction.
   employeeDocumentUpload: (id: string)                => `/api/employees/${encodeURIComponent(id)}/documents/upload`,
+  // Phase 10 hotfix — authenticated file streaming from private R2.
+  // `?download=1` returns Content-Disposition: attachment.
+  employeeDocumentFile: (id: string, docId: string)   => `/api/employees/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}/file`,
+  contractFile:          (id: string)                 => `/api/contracts/${encodeURIComponent(id)}/file`,
   employeeTransactions: (id: string)                  => `/api/employees/${encodeURIComponent(id)}/transactions`,
   employeeTransaction:  (id: string, txnId: string)   => `/api/employees/${encodeURIComponent(id)}/transactions/${encodeURIComponent(txnId)}`,
   // Phase 6A-1 — HR Configuration foundation.

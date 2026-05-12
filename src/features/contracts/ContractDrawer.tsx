@@ -1,4 +1,5 @@
-import { FileText, Eye, AlertTriangle } from 'lucide-react';
+import * as React from 'react';
+import { FileText, Eye, Download, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { DetailDrawer } from '@/components/common/DetailDrawer';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { Separator } from '@/components/ui/separator';
 import { useDataset } from '@/app/dataset-context';
 import { formatDate, relativeDays } from '@/lib/dates';
+import { api } from '@/lib/api/client';
+import { openBlobInNewTab, saveBlobAs } from '@/lib/file-actions';
 import type { Contract, ContractDataQualityIssue } from '@/types/domain';
 
 /**
@@ -42,6 +45,9 @@ export function ContractDrawer({
   contract: Contract | null;
 }) {
   const { employees, contracts } = useDataset();
+  // Hook must run on every render (Rules of Hooks) — declared before the
+  // early null return below.
+  const [pdfLoading, setPdfLoading] = React.useState<'view' | 'download' | null>(null);
 
   if (!contract) {
     return (
@@ -51,15 +57,43 @@ export function ContractDrawer({
     );
   }
 
-  const employee = employees.find((e) => e.id === contract.employeeId);
+  // Capture into a non-null local so callbacks defined below can rely on
+  // narrowing (TS doesn't propagate the function-scope narrowing into the
+  // nested function declarations).
+  const c0 = contract;
+  const employee = employees.find((e) => e.id === c0.employeeId);
   const versions = contracts
-    .filter((c) => c.employeeId === contract.employeeId && c.contractType === contract.contractType)
+    .filter((c) => c.employeeId === c0.employeeId && c.contractType === c0.contractType)
     .sort((a, b) => b.version - a.version);
 
-  function openPdf() {
-    toast.info('PDF view coming in Phase 3', {
-      description: 'Secure private R2 streaming will be wired up with an authenticated API endpoint.',
-    });
+  async function openPdf() {
+    if (pdfLoading) return; // single-flight: ignore double-clicks while in-flight
+    setPdfLoading('view');
+    try {
+      const blob = await api.fetchContractFile(c0.id);
+      openBlobInNewTab(blob, c0.filename);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      // 404 here is the most common case — pre-Phase-3 contracts have no
+      // source PDF in R2 yet. Surface the real reason, don't say "Phase 3".
+      toast.error('Could not open PDF', { description: msg });
+    } finally {
+      setPdfLoading(null);
+    }
+  }
+
+  async function downloadPdf() {
+    if (pdfLoading) return;
+    setPdfLoading('download');
+    try {
+      const blob = await api.fetchContractFile(c0.id, { download: true });
+      saveBlobAs(blob, c0.filename);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      toast.error('Could not download PDF', { description: msg });
+    } finally {
+      setPdfLoading(null);
+    }
   }
 
   const issue = contract.dataQualityIssue;
@@ -95,10 +129,27 @@ export function ContractDrawer({
           <span className="text-xs text-muted-foreground">
             File hash: <span className="font-mono">{contract.fileHash}</span>
           </span>
-          <Button onClick={openPdf} className="gap-2">
-            <Eye className="h-4 w-4" />
-            Open PDF
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={downloadPdf}
+              disabled={pdfLoading !== null}
+              className="gap-2"
+              title="Download the source PDF (private R2)"
+            >
+              <Download className="h-4 w-4" />
+              {pdfLoading === 'download' ? 'Downloading…' : 'Download'}
+            </Button>
+            <Button
+              onClick={openPdf}
+              disabled={pdfLoading !== null}
+              className="gap-2"
+              title="View the source PDF in a new tab (private R2)"
+            >
+              <Eye className="h-4 w-4" />
+              {pdfLoading === 'view' ? 'Opening…' : 'Open PDF'}
+            </Button>
+          </div>
         </div>
       }
     >

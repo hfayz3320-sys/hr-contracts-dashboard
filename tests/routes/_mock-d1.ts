@@ -139,6 +139,76 @@ function nowIso(): string {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
 }
 
+/**
+ * Walk `sql` from `startIdx` (which should be just past an opening `(`)
+ * and return the index of the MATCHING closing `)`, ignoring parens
+ * inside single-quoted string literals. Returns -1 if unmatched.
+ */
+function findMatchingCloseParen(sql: string, startIdx: number): number {
+  let depth = 1;
+  let inQuote = false;
+  for (let i = startIdx; i < sql.length; i++) {
+    const ch = sql[i]!;
+    if (inQuote) {
+      if (ch === "'") {
+        if (sql[i + 1] === "'") { i++; continue; }
+        inQuote = false;
+      }
+      continue;
+    }
+    if (ch === "'") { inQuote = true; continue; }
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Split a SQL list (column or VALUES contents) while respecting single-
+ * quoted strings and parentheses, so `datetime('now')` doesn't get
+ * shredded on its inner comma if a future call gets clever.
+ */
+function splitSqlList(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let inQuote = false;
+  let buf = '';
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]!;
+    if (inQuote) {
+      buf += ch;
+      if (ch === "'") {
+        // SQL escapes a quote by doubling — `''` inside a string literal.
+        if (s[i + 1] === "'") {
+          buf += "'";
+          i++;
+        } else {
+          inQuote = false;
+        }
+      }
+      continue;
+    }
+    if (ch === "'") {
+      inQuote = true;
+      buf += ch;
+      continue;
+    }
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) {
+      out.push(buf);
+      buf = '';
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.length > 0) out.push(buf);
+  return out;
+}
+
 // ---- SELECT ---------------------------------------------------------------
 
 function runSelect(
@@ -215,17 +285,52 @@ function runMutation(
   tables: Record<string, Row[]>,
   checkUnique: (table: string, row: Row) => void,
 ): void {
-  // INSERT
+  // INSERT — match `INSERT [OR IGNORE] INTO <table> (<cols>) VALUES`,
+  // then balance-walk the VALUES paren ourselves. A regex-only capture
+  // breaks on nested calls like `LOWER(?)` because `[\s\S]+?` stops at
+  // the first `)` it sees.
   let m = sql.match(
-    /INSERT(?:\s+OR\s+IGNORE)?\s+INTO\s+(\w+)\s*\(([\s\S]+?)\)\s*VALUES\s*\(([\s\S]+?)\)/i,
+    /INSERT(?:\s+OR\s+IGNORE)?\s+INTO\s+(\w+)\s*\(([\s\S]+?)\)\s*VALUES\s*\(/i,
   );
   if (m) {
     const table = m[1]!;
     const cols = m[2]!.split(',').map((s) => s.trim());
+    const valuesStart = m.index! + m[0].length;
+    const valuesEnd = findMatchingCloseParen(sql, valuesStart);
+    if (valuesEnd === -1) return; // malformed SQL — give up silently
+    const valuesContent = sql.slice(valuesStart, valuesEnd);
+    const values = splitSqlList(valuesContent).map((s) => s.trim());
     if (!tables[table]) tables[table] = [];
     const row: Row = {};
+    // Walk the VALUES list alongside the COLUMNS list so a literal in the
+    // VALUES position (e.g. `'__SQL_NOW__'` after datetime() substitution)
+    // doesn't consume a bind. Without this, a mixed-shape INSERT like:
+    //   (id, …, created_at, updated_at, …, idempotency_key)
+    //   VALUES (?, …, datetime('now'), datetime('now'), …, ?)
+    // would mis-align columns and drop the last bound value silently.
+    let bindCursor = 0;
     cols.forEach((c, i) => {
-      row[c] = binds[i];
+      const v = values[i] ?? '?';
+      if (v === '?') {
+        row[c] = binds[bindCursor++];
+      } else if (/^LOWER\(\?\)$/i.test(v)) {
+        // Repo writes `LOWER(?)` for email columns; mirror SQLite's
+        // case-fold so the row is queryable by `findByLowerEmail` later.
+        const b = binds[bindCursor++];
+        row[c] = typeof b === 'string' ? b.toLowerCase() : b;
+      } else if (/^UPPER\(\?\)$/i.test(v)) {
+        const b = binds[bindCursor++];
+        row[c] = typeof b === 'string' ? b.toUpperCase() : b;
+      } else if (v.startsWith("'") && v.endsWith("'")) {
+        const lit = v.slice(1, -1);
+        row[c] = lit === '__SQL_NOW__' ? nowIso() : lit;
+      } else if (/^\d+$/.test(v)) {
+        row[c] = Number(v);
+      } else {
+        // Unknown expression — store the literal text so a downstream
+        // assertion can still see "something landed here".
+        row[c] = v;
+      }
     });
     // Defaults that real D1 would supply on INSERT (only the ones the
     // migrations use): created_at/updated_at via datetime('now'), and

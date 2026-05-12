@@ -31,10 +31,13 @@ import {
   IdCard, Globe, Mail, ShieldCheck, ShieldAlert, FileText,
   HeartPulse, FolderOpen, ClipboardList, GraduationCap, Wallet,
   AlertTriangle, MessageSquare, PencilLine, Bell, Upload, Plus,
-  ChevronRight, UserPlus,
+  ChevronRight, UserPlus, Eye, Download as DownloadIcon,
   Building2, BadgeCheck, History as HistoryIcon, Calendar, CheckCircle2,
   ScrollText, User, Gauge, Inbox,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { api } from '@/lib/api/client';
+import { openBlobInNewTab, saveBlobAs } from '@/lib/file-actions';
 import { cn } from '@/lib/utils';
 import { formatDate } from '@/lib/dates';
 import { routes } from '@/lib/routes';
@@ -261,7 +264,7 @@ export function EmployeeProfileErp(props: EmployeeProfileErpProps) {
           {tab === 'job'          && <JobSection employee={e} currentEmployeeNumber={currentEmployeeNumber} />}
           {tab === 'contracts'    && <ContractsLifecycle split={split} />}
           {tab === 'insurance'    && <InsuranceSection rows={insurance} />}
-          {tab === 'documents'    && <DocumentsSection rows={documents} />}
+          {tab === 'documents'    && <DocumentsSection rows={documents} employeeId={e.id} />}
           {tab === 'transactions' && <TransactionsSection rows={transactions} />}
           {tab === 'payroll'      && <PayrollSection lines={compensation} canWrite={canWrite} onAdd={() => setAction('compensation')} />}
           {tab === 'learning'     && <LearningSection records={learning} canWrite={canWrite} onAdd={() => setAction('learning')} />}
@@ -545,14 +548,14 @@ function InsuranceSection({ rows }: { rows: Insurance[] }) {
   );
 }
 
-function DocumentsSection({ rows }: { rows: EmployeeDocument[] }) {
+function DocumentsSection({ rows, employeeId }: { rows: EmployeeDocument[]; employeeId: string }) {
   if (rows.length === 0) {
     return (
       <Panel title="Documents">
         <EmptyState
           icon={FolderOpen}
           title="No documents on file"
-          description="Iqama, passport, visa, work permit, and insurance card uploads will appear here. Upload + manage flows ship in a later phase."
+          description="Iqama, passport, visa, work permit, and insurance card uploads will appear here. Use the Upload button in the profile toolbar to add one."
         />
       </Panel>
     );
@@ -562,6 +565,10 @@ function DocumentsSection({ rows }: { rows: EmployeeDocument[] }) {
       <ul className="divide-y">
         {rows.map((d) => {
           const status = d.computedStatus ?? d.status;
+          // A row is downloadable iff its metadata carries an R2 object key
+          // (set by the Upload modal). Metadata-only rows registered by
+          // earlier admin flows have no file and surface as "no file".
+          const hasFile = typeof d.metadata?.['r2ObjectKey'] === 'string';
           return (
             <li key={d.id} className="px-4 py-2.5 flex items-start gap-3 hover:bg-muted/30 transition-colors duration-fast">
               <FolderOpen className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -572,6 +579,7 @@ function DocumentsSection({ rows }: { rows: EmployeeDocument[] }) {
                   {d.expiresAt ? <> · expires {formatDate(d.expiresAt)}</> : null}
                 </div>
               </div>
+              <DocumentFileActions employeeId={employeeId} docId={d.id} hasFile={hasFile} />
               <Chip
                 tone={
                   status === 'active' ? 'active' :
@@ -587,6 +595,68 @@ function DocumentsSection({ rows }: { rows: EmployeeDocument[] }) {
         })}
       </ul>
     </Panel>
+  );
+}
+
+function DocumentFileActions({
+  employeeId, docId, hasFile,
+}: {
+  employeeId: string;
+  docId: string;
+  hasFile: boolean;
+}) {
+  const [busy, setBusy] = React.useState<'view' | 'download' | null>(null);
+  if (!hasFile) {
+    return (
+      <span className="text-[10.5px] text-muted-foreground italic mr-2 self-center" title="No file uploaded — metadata only">
+        no file
+      </span>
+    );
+  }
+  async function run(kind: 'view' | 'download') {
+    if (busy) return;
+    setBusy(kind);
+    try {
+      const blob = await api.fetchEmployeeDocumentFile(employeeId, docId, {
+        download: kind === 'download',
+      });
+      // Filename for save-as: server set Content-Disposition with the
+      // original name; the blob itself doesn't carry it, so we use a
+      // generic fallback. The browser respects the server header for
+      // direct downloads anyway; this path is only when we open as blob.
+      if (kind === 'view') openBlobInNewTab(blob);
+      else saveBlobAs(blob, `document-${docId}.bin`);
+    } catch (err) {
+      toast.error(kind === 'view' ? 'Could not open file' : 'Could not download', {
+        description: err instanceof Error ? err.message : 'Unknown error',
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <div className="flex items-center gap-1 mr-1">
+      <AliveButton
+        variant="ghost"
+        size="xs"
+        icon={<Eye className="h-3.5 w-3.5" />}
+        onClick={() => run('view')}
+        disabled={busy !== null}
+        title="View in new tab"
+      >
+        {busy === 'view' ? '…' : 'View'}
+      </AliveButton>
+      <AliveButton
+        variant="ghost"
+        size="xs"
+        icon={<DownloadIcon className="h-3.5 w-3.5" />}
+        onClick={() => run('download')}
+        disabled={busy !== null}
+        title="Download"
+      >
+        {busy === 'download' ? '…' : 'Download'}
+      </AliveButton>
+    </div>
   );
 }
 
@@ -824,13 +894,32 @@ function ChatterPanel({
 }) {
   // Phase 10 — merge real audit + timeline + activities into a single feed,
   // newest first. Each kind has its own visual style but shares the layout.
+  //
+  // Dedupe rule: every successful write here ALSO writes an audit_events row
+  // (so the immutable audit trail stays complete). We must NOT render the
+  // audit copy if the underlying row is already represented as a dedicated
+  // feed item, otherwise the user sees the same note twice — once as
+  // `employee.note` from the audit feed and once as the timeline-entry
+  // card. The set below names every audit action whose dedicated tile is
+  // already in this feed; everything else falls through and renders as a
+  // plain audit row (so contract.patch, employee_document.uploaded, etc.
+  // remain visible — they have no dedicated tile here).
+  const FEED_DUPLICATE_AUDIT_ACTIONS = new Set<string>([
+    'employee.message',         // covered by timeline (entryType='message')
+    'employee.note',            // covered by timeline (entryType='note')
+    'employee.activity_create', // covered by activities row
+    'employee.activity_update', // shown by the activities row's status
+  ]);
   type FeedItem =
     | { kind: 'audit';    at: string; row: AuditEvent }
     | { kind: 'message';  at: string; row: EmployeeTimelineEntry }
     | { kind: 'note';     at: string; row: EmployeeTimelineEntry }
     | { kind: 'activity'; at: string; row: EmployeeActivity };
   const feed: FeedItem[] = [];
-  for (const a of audit) feed.push({ kind: 'audit', at: a.at, row: a });
+  for (const a of audit) {
+    if (FEED_DUPLICATE_AUDIT_ACTIONS.has(a.action)) continue;
+    feed.push({ kind: 'audit', at: a.at, row: a });
+  }
   for (const t of timeline) feed.push({ kind: t.entryType, at: t.createdAt, row: t });
   for (const a of activities) feed.push({ kind: 'activity', at: a.createdAt, row: a });
   feed.sort((a, b) => b.at.localeCompare(a.at));
