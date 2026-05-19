@@ -141,6 +141,7 @@ async function upsertPerson(db, jobId, row, summary, opts) {
       name_en: row.nameEn || null, name_ar: row.nameAr || null,
       nationality: row.nationality || null, date_of_birth: row.dateOfBirth || null,
       mobile: row.mobile || null, email: row.email || null, iban: row.iban || null,
+      passport_number: row.passportNumber || null,
       latest_employee_number: row.employeeNumber || null,
       source: row.source || 'admin-import',
       created_at: NOW(), updated_at: NOW(),
@@ -148,13 +149,13 @@ async function upsertPerson(db, jobId, row, summary, opts) {
     await db
       .prepare(
         `INSERT INTO persons (id, identity_number, name_en, name_ar, nationality, date_of_birth,
-          mobile, email, iban, latest_employee_number, source, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+          mobile, email, iban, passport_number, latest_employee_number, source, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
       )
       .bind(
         newPerson.id, newPerson.identity_number, newPerson.name_en, newPerson.name_ar,
         newPerson.nationality, newPerson.date_of_birth, newPerson.mobile, newPerson.email,
-        newPerson.iban, newPerson.latest_employee_number, newPerson.source,
+        newPerson.iban, newPerson.passport_number, newPerson.latest_employee_number, newPerson.source,
         newPerson.created_at, newPerson.updated_at
       )
       .run();
@@ -172,6 +173,7 @@ async function upsertPerson(db, jobId, row, summary, opts) {
     mobile: row.mobile || existing.mobile,
     email: row.email || existing.email,
     iban: row.iban || existing.iban,
+    passport_number: row.passportNumber || existing.passport_number,
     latest_employee_number: row.employeeNumber || existing.latest_employee_number,
   };
   const changed = Object.keys(merged).some((k) => merged[k] !== existing[k]);
@@ -189,12 +191,12 @@ async function upsertPerson(db, jobId, row, summary, opts) {
   await db
     .prepare(
       `UPDATE persons SET name_en=?, name_ar=?, nationality=?, date_of_birth=?,
-        mobile=?, email=?, iban=?, latest_employee_number=?, updated_at=?
+        mobile=?, email=?, iban=?, passport_number=?, latest_employee_number=?, updated_at=?
        WHERE id=?`
     )
     .bind(
       merged.name_en, merged.name_ar, merged.nationality, merged.date_of_birth,
-      merged.mobile, merged.email, merged.iban, merged.latest_employee_number,
+      merged.mobile, merged.email, merged.iban, merged.passport_number, merged.latest_employee_number,
       NOW(), existing.id
     )
     .run();
@@ -266,6 +268,8 @@ async function upsertContract(db, jobId, contract, summary, opts) {
             person_id=?, employee_number=?, contract_number=?, contract_type=?,
             start_date=?, end_date=?, contract_end_type=?, joining_date=?,
             duration_years=?, salary_basic=?, salary_total=?, iban=?, mobile=?, email=?,
+            passport_number=?, gender=?, marital_status=?, birth_date=?, occupation=?,
+            work_location=?, bank_name=?, education_level=?, speciality=?,
             parser_type=?, confidence_score=?, source_file_name=?, source_file_hash=?,
             import_job_id=?, updated_at=?
            WHERE id=?`
@@ -285,6 +289,15 @@ async function upsertContract(db, jobId, contract, summary, opts) {
           contract.iban || existing.iban,
           contract.mobile || existing.mobile,
           contract.email || existing.email,
+          contract.passportNumber || existing.passport_number,
+          contract.gender || existing.gender,
+          contract.maritalStatus || existing.marital_status,
+          contract.birthDate || existing.birth_date,
+          contract.occupation || existing.occupation,
+          contract.workLocation || existing.work_location,
+          contract.bankName || existing.bank_name,
+          contract.educationLevel || existing.education_level,
+          contract.speciality || existing.speciality,
           contract.parserType || existing.parser_type,
           newConfidence, contract.sourceFileName || existing.source_file_name,
           contract.sourceFileHash || existing.source_file_hash,
@@ -311,10 +324,12 @@ async function upsertContract(db, jobId, contract, summary, opts) {
         (id, person_id, identity_number, employee_number, contract_number, contract_type,
          start_date, end_date, contract_end_type, joining_date, duration_years,
          salary_basic, salary_total, iban, mobile, email,
+         passport_number, gender, marital_status, birth_date, occupation,
+         work_location, bank_name, education_level, speciality,
          parser_type, confidence_score, source_file_name, source_file_hash,
          contract_key, import_job_id, created_at, updated_at,
          r2_object_key, has_private_file)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .bind(
       id, person ? person.id : null, identity, contract.employeeNumber || null,
@@ -324,6 +339,11 @@ async function upsertContract(db, jobId, contract, summary, opts) {
       contract.durationYears || null, contract.salaryBasic ?? null,
       contract.salaryTotal ?? null, contract.iban || null,
       contract.mobile || null, contract.email || null,
+      contract.passportNumber || null, contract.gender || null,
+      contract.maritalStatus || null, contract.birthDate || null,
+      contract.occupation || null, contract.workLocation || null,
+      contract.bankName || null, contract.educationLevel || null,
+      contract.speciality || null,
       contract.parserType || null, Number(contract.confidenceScore || 0),
       contract.sourceFileName || null, contract.sourceFileHash || null,
       key, jobId, NOW(), NOW(),
@@ -370,7 +390,8 @@ async function upsertInsurance(db, jobId, rec, summary, opts) {
       .prepare(
         `UPDATE insurance_records SET
           person_id=?, main_member_id=?, staff_number=?, class_name=?,
-          effective_date=?, expiry_date=?, import_job_id=?, updated_at=?
+          effective_date=?, expiry_date=?, plan_class=?, nationality=?, review_flags_json=?,
+          import_job_id=?, updated_at=?
          WHERE id=?`
       )
       .bind(
@@ -380,6 +401,9 @@ async function upsertInsurance(db, jobId, rec, summary, opts) {
         rec.className || existing.class_name,
         rec.effectiveDate || existing.effective_date,
         rec.expiryDate || existing.expiry_date,
+        rec.planClass || existing.plan_class,
+        rec.nationality || existing.nationality,
+        rec.reviewFlagsJson || existing.review_flags_json,
         jobId, NOW(), existing.id
       )
       .run();
@@ -394,14 +418,17 @@ async function upsertInsurance(db, jobId, rec, summary, opts) {
     .prepare(
       `INSERT INTO insurance_records
         (id, person_id, identity_number, main_member_id, staff_number, member_name,
-         policy_no, class_name, effective_date, expiry_date, import_job_id, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+         policy_no, class_name, effective_date, expiry_date,
+         plan_class, nationality, review_flags_json,
+         import_job_id, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
     )
     .bind(
       id, person ? person.id : null, identity,
       rec.mainMemberId || null, rec.staffNumber || null, rec.memberName || null,
       rec.policyNo || null, rec.className || null,
       rec.effectiveDate || null, rec.expiryDate || null,
+      rec.planClass || null, rec.nationality || null, rec.reviewFlagsJson || null,
       jobId, NOW(), NOW()
     )
     .run();
