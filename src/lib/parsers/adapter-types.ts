@@ -78,23 +78,39 @@ export interface PdfContractAdapter {
 export type ContractExtraction = {
   filename: string;
   fileHash: string;
+  sourceFile?: string;
   /**
    * 'unknown' when no template adapter recognised the document — the row
    * still flows downstream (with rawTextSnippet) so the review queue can
    * surface it to an admin instead of silently failing.
    */
   templateType: 'old_contract' | 'new_contract' | 'unknown';
+  contractNumber?: string;
+  executionDate?: string;
   identityNumber?: string;
   fullName?: string;
   nationality?: string;
+  passportNumber?: string;
+  gender?: string;
+  maritalStatus?: string;
+  birthDate?: string;
+  educationLevel?: string;
+  speciality?: string;
+  mobile?: string;
+  email?: string;
+  occupation?: string;
   jobTitle?: string;
+  workLocation?: string;
   contractType?: string;
   startDate?: string;
   endDate?: string;
   basicSalary?: number;
   housingAllowance?: number;
   transportAllowance?: number;
+  otherCashAllowances?: number;
   totalSalary?: number;
+  bankName?: string;
+  iban?: string;
   /** Number in [0, 1]. >= 0.6 is generally acceptable. */
   extractionConfidence: number;
   /** Canonical names of fields the adapter could not extract. */

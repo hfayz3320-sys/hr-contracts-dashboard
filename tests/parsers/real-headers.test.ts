@@ -245,6 +245,23 @@ describe('Golden: popa.xlsx (Bupa insurance)', () => {
     const statuses = wb.sheets[0]!.rows.map((r) => r.status);
     expect(statuses).toEqual(['active', 'expired', 'active', 'expired', 'missing']);
   });
+
+  it('normalizes Bupa mmm-date format (e.g. 11-Jun-25) to ISO', async () => {
+    const file = makeXlsx('popa-dates.xlsx', {
+      Sheet1: [
+        {
+          ...FULL_HEADERS,
+          IDNo: '2111111119',
+          BupaID: 'BUP-9',
+          MemberEffectiveDate: '11-Jun-25',
+        },
+      ],
+    });
+    const wb = await parseExcelFile(file, 'insurance');
+    const row = wb.sheets[0]!.rows[0]!;
+    expect(row.startDate).toBe('2025-06-11');
+    expect(row.endDate).toBe('2026-06-11');
+  });
 });
 
 describe('Mixed and edge cases', () => {

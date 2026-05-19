@@ -4,6 +4,7 @@ import {
   listContracts,
   getContractById,
   updateContractFields,
+  reassignContractEmployee,
 } from '../db/repo-contracts';
 import { findEmployeeByIdentity } from '../db/repo-employees';
 import { findSourceFile } from '../db/repo-source-files';
@@ -127,11 +128,27 @@ contractRoutes.patch('/api/contracts/:id', requireAdmin, async (c) => {
   const actor = (await getActorEmail(c)) ?? 'unknown';
 
   let patchWithEmployee: Parameters<typeof updateContractFields>[2] = { ...parsed.data };
-  if (parsed.data.identityNumber !== undefined && parsed.data.identityNumber !== before.identityNumber) {
+  let newEmployeeId: string | undefined;
+  if (parsed.data.employeeId !== undefined) {
+    newEmployeeId = parsed.data.employeeId;
+  } else if (
+    parsed.data.identityNumber !== undefined &&
+    parsed.data.identityNumber !== before.identityNumber
+  ) {
     const emp = await findEmployeeByIdentity(c.env, parsed.data.identityNumber);
-    if (emp) patchWithEmployee = { ...patchWithEmployee, employeeId: emp.id };
+    if (emp) {
+      newEmployeeId = emp.id;
+      patchWithEmployee = { ...patchWithEmployee, employeeId: emp.id };
+    }
   }
   await updateContractFields(c.env, id, patchWithEmployee);
+  if (newEmployeeId && newEmployeeId !== before.employeeId) {
+    try {
+      await reassignContractEmployee(c.env, id, newEmployeeId);
+    } catch {
+      /* compensation table may be absent pre-0007 */
+    }
+  }
 
   const after = await getContractById(c.env, id);
   if (!after) {

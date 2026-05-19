@@ -3,6 +3,18 @@ import type { Insurance, InsuranceStatus } from '@shared/domain';
 import { buildEmployeeSummaryMap } from './employee-summary';
 import { computeInsuranceStatus } from '../lib/insurance-status';
 
+function parseReviewFlags(raw: string | null | undefined): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const out = parsed.filter((v): v is string => typeof v === 'string');
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 type InsuranceRow = {
   id: string;
   employee_id: string | null;
@@ -16,6 +28,10 @@ type InsuranceRow = {
   matched: number;
   unmatched_reason: string | null;
   created_at: string;
+  plan_class?: string | null;
+  nationality?: string | null;
+  member_name?: string | null;
+  review_flags_json?: string | null;
 };
 
 /**
@@ -45,13 +61,18 @@ function rowToInsurance(r: InsuranceRow): Insurance {
     startDate: r.start_date,
     endDate: r.end_date,
   });
+  const reviewFlags = parseReviewFlags(r.review_flags_json);
   return {
     id: r.id,
     ...(r.employee_id != null ? { employeeId: r.employee_id } : {}),
     ...(r.identity_number != null ? { identityNumber: r.identity_number } : {}),
     policyNumber: r.policy_number,
     ...(r.member_number != null ? { memberNumber: r.member_number } : {}),
+    ...(r.member_name != null ? { memberName: r.member_name } : {}),
     provider: r.provider,
+    ...(r.plan_class != null ? { planClass: r.plan_class } : {}),
+    ...(r.nationality != null ? { nationality: r.nationality } : {}),
+    ...(reviewFlags ? { reviewFlags } : {}),
     startDate: r.start_date,
     endDate: r.end_date,
     status: computed,
@@ -134,6 +155,10 @@ export type InsuranceUpsertInput = {
   status: InsuranceStatus;
   matched: boolean;
   unmatchedReason?: Insurance['unmatchedReason'];
+  planClass?: string | null;
+  nationality?: string | null;
+  memberName?: string | null;
+  reviewFlags?: string[] | null;
   /** Source-traceability. */
   sourceFileId: string;
 };
@@ -163,28 +188,60 @@ export async function insertInsurance(
   id: string,
   input: InsuranceUpsertInput,
 ): Promise<string> {
-  await env.DB
-    .prepare(
-      `INSERT OR IGNORE INTO insurance_policies
-       (id, employee_id, identity_number, policy_number, member_number, provider,
-        start_date, end_date, status, matched, unmatched_reason, source_file_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      id,
-      input.employeeId ?? null,
-      input.identityNumber ?? null,
-      input.policyNumber,
-      input.memberNumber ?? null,
-      input.provider,
-      input.startDate,
-      input.endDate,
-      input.status,
-      input.matched ? 1 : 0,
-      input.unmatchedReason ?? null,
-      input.sourceFileId,
-    )
-    .run();
+  try {
+    await env.DB
+      .prepare(
+        `INSERT OR IGNORE INTO insurance_policies
+         (id, employee_id, identity_number, policy_number, member_number, provider,
+          plan_class, nationality, member_name, review_flags_json,
+          start_date, end_date, status, matched, unmatched_reason, source_file_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        input.employeeId ?? null,
+        input.identityNumber ?? null,
+        input.policyNumber,
+        input.memberNumber ?? null,
+        input.provider,
+        input.planClass ?? null,
+        input.nationality ?? null,
+        input.memberName ?? null,
+        input.reviewFlags && input.reviewFlags.length > 0 ? JSON.stringify(input.reviewFlags) : null,
+        input.startDate,
+        input.endDate,
+        input.status,
+        input.matched ? 1 : 0,
+        input.unmatchedReason ?? null,
+        input.sourceFileId,
+      )
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/no such column/i.test(msg)) throw err;
+    await env.DB
+      .prepare(
+        `INSERT OR IGNORE INTO insurance_policies
+         (id, employee_id, identity_number, policy_number, member_number, provider,
+          start_date, end_date, status, matched, unmatched_reason, source_file_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        id,
+        input.employeeId ?? null,
+        input.identityNumber ?? null,
+        input.policyNumber,
+        input.memberNumber ?? null,
+        input.provider,
+        input.startDate,
+        input.endDate,
+        input.status,
+        input.matched ? 1 : 0,
+        input.unmatchedReason ?? null,
+        input.sourceFileId,
+      )
+      .run();
+  }
   const found = await findInsuranceByExtendedMatchKey(
     env,
     input.identityNumber ?? null,
@@ -212,11 +269,40 @@ export async function updateInsuranceFields(
   if (input.status !== undefined) { sets.push('status = ?'); binds.push(input.status); }
   if (input.matched !== undefined) { sets.push('matched = ?'); binds.push(input.matched ? 1 : 0); }
   if (input.unmatchedReason !== undefined) { sets.push('unmatched_reason = ?'); binds.push(input.unmatchedReason ?? null); }
+  if (input.planClass !== undefined) { sets.push('plan_class = ?'); binds.push(input.planClass ?? null); }
+  if (input.nationality !== undefined) { sets.push('nationality = ?'); binds.push(input.nationality ?? null); }
+  if (input.memberName !== undefined) { sets.push('member_name = ?'); binds.push(input.memberName ?? null); }
+  if (input.reviewFlags !== undefined) { sets.push('review_flags_json = ?'); binds.push(input.reviewFlags ? JSON.stringify(input.reviewFlags) : null); }
   if (input.sourceFileId !== undefined) { sets.push('source_file_id = ?'); binds.push(input.sourceFileId); }
   if (sets.length === 0) return;
   binds.push(id);
-  await env.DB
-    .prepare(`UPDATE insurance_policies SET ${sets.join(', ')} WHERE id = ?`)
-    .bind(...binds)
-    .run();
+  try {
+    await env.DB
+      .prepare(`UPDATE insurance_policies SET ${sets.join(', ')} WHERE id = ?`)
+      .bind(...binds)
+      .run();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/no such column/i.test(msg)) throw err;
+    // Legacy schema fallback (pre-migration columns).
+    const legacySets: string[] = [];
+    const legacyBinds: unknown[] = [];
+    if (input.employeeId !== undefined) { legacySets.push('employee_id = ?'); legacyBinds.push(input.employeeId); }
+    if (input.identityNumber !== undefined) { legacySets.push('identity_number = ?'); legacyBinds.push(input.identityNumber); }
+    if (input.policyNumber !== undefined) { legacySets.push('policy_number = ?'); legacyBinds.push(input.policyNumber); }
+    if (input.memberNumber !== undefined) { legacySets.push('member_number = ?'); legacyBinds.push(input.memberNumber); }
+    if (input.provider !== undefined) { legacySets.push('provider = ?'); legacyBinds.push(input.provider); }
+    if (input.startDate !== undefined) { legacySets.push('start_date = ?'); legacyBinds.push(input.startDate); }
+    if (input.endDate !== undefined) { legacySets.push('end_date = ?'); legacyBinds.push(input.endDate); }
+    if (input.status !== undefined) { legacySets.push('status = ?'); legacyBinds.push(input.status); }
+    if (input.matched !== undefined) { legacySets.push('matched = ?'); legacyBinds.push(input.matched ? 1 : 0); }
+    if (input.unmatchedReason !== undefined) { legacySets.push('unmatched_reason = ?'); legacyBinds.push(input.unmatchedReason ?? null); }
+    if (input.sourceFileId !== undefined) { legacySets.push('source_file_id = ?'); legacyBinds.push(input.sourceFileId); }
+    if (legacySets.length === 0) return;
+    legacyBinds.push(id);
+    await env.DB
+      .prepare(`UPDATE insurance_policies SET ${legacySets.join(', ')} WHERE id = ?`)
+      .bind(...legacyBinds)
+      .run();
+  }
 }

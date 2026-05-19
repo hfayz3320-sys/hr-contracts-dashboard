@@ -6,10 +6,13 @@ import {
   listImportJobItems,
   getImportJobItem,
   updateImportJobItemCorrections,
+  updateImportJobItemCorrectionResolution,
 } from '../db/repo-imports';
 import { requireAuth, requireAdmin, getActorEmail } from '../lib/auth';
 import { writeAudit } from '../lib/audit';
 import { importJobItemPatchRequest } from '@shared/api-contract';
+import { resolveDryRunItem } from '../lib/dry-run';
+import type { ImportJobType } from '@shared/domain';
 
 export const importJobRoutes = new Hono<AppContext>();
 
@@ -36,18 +39,17 @@ importJobRoutes.get('/api/import-jobs/:id/items', async (c) => {
   return c.json({ jobId: id, items });
 });
 
-/**
- * PATCH /api/import-jobs/:id/items/:itemId — admin-only.
- *
- * Stores the user's field edits as JSON on `import_job_items.corrected_payload`.
- * The commit pipeline merges these over `raw_payload` before applying, so
- * the committed row reflects the user's review, not the raw parser
- * output. Audit row: `contract_import.review_updated`.
- *
- * The route does NOT mutate the entity itself — that only happens at
- * /api/imports/commit. So PATCH-then-cancel leaves the entity tables
- * untouched.
- */
+function mergeCorrections(
+  raw: Record<string, unknown>,
+  corrected: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...raw };
+  for (const [k, v] of Object.entries(corrected)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
 importJobRoutes.patch('/api/import-jobs/:id/items/:itemId', requireAdmin, async (c) => {
   const jobId = c.req.param('id');
   const itemId = c.req.param('itemId');
@@ -72,7 +74,22 @@ importJobRoutes.patch('/api/import-jobs/:id/items/:itemId', requireAdmin, async 
     );
   }
   try {
-    await updateImportJobItemCorrections(c.env, itemId, parsed.data.corrections);
+    const nextCorrections = mergeCorrections(item.correctedPayload ?? {}, parsed.data.corrections);
+    await updateImportJobItemCorrections(c.env, itemId, nextCorrections);
+    const merged = mergeCorrections(item.rawPayload, nextCorrections);
+    const resolved = await resolveDryRunItem(
+      c.env,
+      job.type as ImportJobType,
+      merged,
+      item.rowIndex,
+    );
+    await updateImportJobItemCorrectionResolution(c.env, itemId, {
+      identityNumber: resolved.identityNumber,
+      resolvedAction: resolved.resolvedAction,
+      targetId: resolved.targetId ?? null,
+      reason: resolved.reason ?? null,
+      diff: resolved.diff ?? null,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/no such column/i.test(msg)) {
@@ -93,7 +110,9 @@ importJobRoutes.patch('/api/import-jobs/:id/items/:itemId', requireAdmin, async 
     action: 'contract_import.review_updated',
     target: itemId,
     status: 'ok',
-    details: `Edited ${Object.keys(parsed.data.corrections).length} field(s) on import item`,
+    details:
+      `Edited ${Object.keys(parsed.data.corrections).length} field(s) on import item` +
+      ' and reran resolver',
   });
   const after = await getImportJobItem(c.env, itemId);
   return c.json({ ok: true as const, item: after });

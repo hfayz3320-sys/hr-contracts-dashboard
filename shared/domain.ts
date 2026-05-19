@@ -20,6 +20,10 @@ export type Employee = {
   nationality?: string;
   dateOfBirth?: string;
   hireDate?: string;
+  mobile?: string;
+  email?: string;
+  passportNumber?: string;
+  notes?: string;
   status: EmployeeStatus;
   sourceFiles: string[];
   createdAt: string;
@@ -116,6 +120,21 @@ export type Contract = {
   otherAllowances?: { code: string; name: string; amount: number }[];
   totalSalary?: number | null;
   currency?: string;
+  contractNumber?: string | null;
+  executionDate?: string | null;
+  passportNumber?: string | null;
+  gender?: string | null;
+  maritalStatus?: string | null;
+  birthDate?: string | null;
+  occupation?: string | null;
+  workLocation?: string | null;
+  mobile?: string | null;
+  email?: string | null;
+  bankName?: string | null;
+  iban?: string | null;
+  educationLevel?: string | null;
+  speciality?: string | null;
+  extractionWarnings?: string[];
   // Phase 3B — populated when the endpoint is called with `?includeEmployee=1`.
   // Both are absent on the bare contract list, so existing consumers are
   // unaffected. The Contracts page passes the flag and renders names from
@@ -133,12 +152,16 @@ export type Insurance = {
   employeeId?: string;
   identityNumber?: IdentityNumber;
   policyNumber: string;
-  memberNumber?: string;
+  memberNumber?: string | null;
+  memberName?: string | null;
   provider: string;
+  planClass?: string | null;
+  nationality?: string | null;
   startDate: string;
   endDate: string | null;
   status: InsuranceStatus;
   matched: boolean;
+  reviewFlags?: string[] | null;
   unmatchedReason?: 'no_identity_match' | 'no_employee_number_match' | 'name_only';
   createdAt: string;
   // Phase 3B — populated when `?includeEmployee=1`. See Contract.employeeSummary.

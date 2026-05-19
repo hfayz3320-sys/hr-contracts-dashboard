@@ -25,6 +25,7 @@
  *     target employee id so the entry appears in the Activity panel.
  */
 import { Hono } from 'hono';
+import type { Context } from 'hono';
 import type { AppContext } from '../env';
 import { getEmployee } from '../db/repo-employees';
 import {
@@ -75,7 +76,10 @@ employee360ActionsRoutes.get('/api/employees/:id/timeline', async (c) => {
   return c.json({ items, total: items.length });
 });
 
-async function postTimeline(c: Parameters<Parameters<typeof employee360ActionsRoutes.post>[2]>[0], entryType: 'message' | 'note') {
+async function postTimeline(
+  c: Context<AppContext>,
+  entryType: 'message' | 'note',
+) {
   const id = c.req.param('id');
   if (!id) return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
   const employee = await getEmployee(c.env, id);

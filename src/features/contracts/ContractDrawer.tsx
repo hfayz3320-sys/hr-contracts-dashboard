@@ -178,7 +178,15 @@ export function ContractDrawer({
         <Field label="Identity Number">
           <span className="font-mono tabular">{contract.identityNumber}</span>
         </Field>
-        <Field label="Employee">{employee?.fullName ?? '—'}</Field>
+        <Field label="Employee">{employee?.fullName ?? contract.employeeSummary?.fullName ?? '—'}</Field>
+        {contract.contractNumber ? (
+          <Field label="Contract number">
+            <span className="font-mono tabular">{contract.contractNumber}</span>
+          </Field>
+        ) : null}
+        {contract.executionDate ? (
+          <Field label="Execution date">{formatDate(contract.executionDate)}</Field>
+        ) : null}
         <Field label="Start Date">{formatDate(contract.startDate)}</Field>
         <Field label="End Date">
           {formatDate(contract.endDate)}
@@ -186,7 +194,76 @@ export function ContractDrawer({
         </Field>
         <Field label="Type">{contract.contractType}</Field>
         <Field label="Version">v{contract.version}</Field>
+        {contract.mobile ? <Field label="Mobile">{contract.mobile}</Field> : null}
+        {contract.email ? <Field label="Email">{contract.email}</Field> : null}
+        {contract.passportNumber ? (
+          <Field label="Passport">
+            <span className="font-mono">{contract.passportNumber}</span>
+          </Field>
+        ) : null}
       </div>
+
+      {(contract.basicSalary != null || contract.totalSalary != null) && (
+        <>
+          <Separator className="my-6" />
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+            Salary package
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {contract.basicSalary != null ? (
+              <Field label="Basic salary">
+                <span className="tabular">
+                  {contract.basicSalary.toLocaleString()} {contract.currency ?? 'SAR'}
+                </span>
+              </Field>
+            ) : null}
+            {contract.housingAllowance != null ? (
+              <Field label="Housing">
+                <span className="tabular">{contract.housingAllowance.toLocaleString()}</span>
+              </Field>
+            ) : null}
+            {contract.transportAllowance != null ? (
+              <Field label="Transport">
+                <span className="tabular">{contract.transportAllowance.toLocaleString()}</span>
+              </Field>
+            ) : null}
+            {contract.otherAllowances?.map((a) => (
+              <Field key={a.code} label={a.name}>
+                <span className="tabular">{a.amount.toLocaleString()}</span>
+              </Field>
+            ))}
+            {contract.totalSalary != null ? (
+              <Field label="Monthly package">
+                <span className="font-medium tabular">
+                  {contract.totalSalary.toLocaleString()} {contract.currency ?? 'SAR'}
+                </span>
+              </Field>
+            ) : null}
+          </div>
+        </>
+      )}
+
+      {(contract.bankName || contract.iban) && (
+        <>
+          <Separator className="my-6" />
+          <div className="grid grid-cols-2 gap-4">
+            {contract.bankName ? <Field label="Bank">{contract.bankName}</Field> : null}
+            {contract.iban ? (
+              <Field label="IBAN">
+                <span className="font-mono text-xs break-all">{contract.iban}</span>
+              </Field>
+            ) : null}
+          </div>
+        </>
+      )}
+
+      {contract.extractionWarnings && contract.extractionWarnings.length > 0 && (
+        <div className="mt-6 rounded-md border border-status-expiring/30 bg-status-expiring-soft px-3 py-2.5 text-xs text-status-expiring space-y-1">
+          {contract.extractionWarnings.map((w) => (
+            <div key={w}>{w}</div>
+          ))}
+        </div>
+      )}
 
       <Separator className="my-6" />
 

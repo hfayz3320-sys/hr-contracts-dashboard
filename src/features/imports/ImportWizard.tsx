@@ -36,6 +36,7 @@ import { cn } from '@/lib/utils';
 import { sha256OfFile } from '@/lib/parsers/file-hash';
 import { parseExcelFile, type ParsedSheet } from '@/lib/parsers/excel';
 import { parsePdfFile, type ParsedContract } from '@/lib/parsers/pdf';
+import { contractImportRowFromExtraction } from '@/lib/parsers/contract-import-row';
 import {
   useImportUpload,
   useImportUploadRaw,
@@ -207,23 +208,7 @@ export function ImportWizard() {
       const rows: Record<string, unknown>[] =
         parsed.kind === 'parsed-excel'
           ? parsed.sheets.flatMap((s) => s.rows)
-          : parsed.contracts.map((c) => ({
-              identityNumber: c.identityNumber,
-              fullName: c.fullName,
-              nationality: c.nationality,
-              jobTitle: c.jobTitle,
-              contractType: c.contractType ?? 'Fixed-term',
-              startDate: c.startDate,
-              endDate: c.endDate,
-              fileHash: c.fileHash,
-              filename: c.filename,
-              // Phase 8: pass templateType + extractionConfidence to the
-              // dry-run resolver so unknown templates and low-confidence
-              // extractions are routed to Review Required, not silently
-              // committed.
-              templateType: c.templateType,
-              extractionConfidence: c.extractionConfidence,
-            }));
+          : parsed.contracts.map((c) => contractImportRowFromExtraction(c));
 
       const dr = await dryRunMutation.mutateAsync({
         jobId: up.jobId,

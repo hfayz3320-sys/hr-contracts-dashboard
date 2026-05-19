@@ -18,6 +18,8 @@ type EmployeeRow = {
   // Phase 11: added by migration 0009. Optional in the row type so pre-
   // migration databases (where the columns don't exist) still type-check.
   mobile?: string | null;
+  email?: string | null;
+  passport_number?: string | null;
   notes?: string | null;
   status: EmployeeStatus;
   created_at: string;
@@ -44,6 +46,8 @@ function rowToEmployee(r: EmployeeRow, history: EmployeeNumberHistoryEntry[]): E
     ...(r.date_of_birth != null ? { dateOfBirth: r.date_of_birth } : {}),
     ...(r.hire_date != null ? { hireDate: r.hire_date } : {}),
     ...(r.mobile != null ? { mobile: r.mobile } : {}),
+    ...(r.email != null ? { email: r.email } : {}),
+    ...(r.passport_number != null ? { passportNumber: r.passport_number } : {}),
     ...(r.notes != null ? { notes: r.notes } : {}),
     status: r.status,
     sourceFiles: [],
@@ -98,6 +102,8 @@ export type EmployeeUpsertInput = {
   hireDate?: string | null;
   // Phase 11 — manual-create form fields.
   mobile?: string | null;
+  email?: string | null;
+  passportNumber?: string | null;
   notes?: string | null;
   status?: EmployeeStatus;
   /** Source-traceability — required for any production-committed row. */
@@ -118,8 +124,8 @@ export async function insertEmployee(
       .prepare(
         `INSERT OR IGNORE INTO employees
          (id, identity_number, full_name, full_name_arabic, department, job_title,
-          nationality, date_of_birth, hire_date, mobile, notes, status, source_file_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          nationality, date_of_birth, hire_date, mobile, email, passport_number, notes, status, source_file_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         id,
@@ -132,6 +138,8 @@ export async function insertEmployee(
         input.dateOfBirth ?? null,
         input.hireDate ?? null,
         input.mobile ?? null,
+        input.email ?? null,
+        input.passportNumber ?? null,
         input.notes ?? null,
         input.status ?? 'active',
         input.sourceFileId,
@@ -181,6 +189,8 @@ export async function updateEmployeeFields(
   if (input.dateOfBirth !== undefined) { sets.push('date_of_birth = ?'); binds.push(input.dateOfBirth); }
   if (input.hireDate !== undefined) { sets.push('hire_date = ?'); binds.push(input.hireDate); }
   if (input.mobile !== undefined) { sets.push('mobile = ?'); binds.push(input.mobile); }
+  if (input.email !== undefined) { sets.push('email = ?'); binds.push(input.email); }
+  if (input.passportNumber !== undefined) { sets.push('passport_number = ?'); binds.push(input.passportNumber); }
   if (input.notes !== undefined) { sets.push('notes = ?'); binds.push(input.notes); }
   if (input.status !== undefined) { sets.push('status = ?'); binds.push(input.status); }
   if (input.sourceFileId !== undefined) { sets.push('source_file_id = ?'); binds.push(input.sourceFileId); }

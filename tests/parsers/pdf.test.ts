@@ -29,18 +29,31 @@ vi.mock('unpdf', () => ({
 }));
 
 const SYNTH_NEW_CONTRACT_EN = `
-EMPLOYMENT CONTRACT (new appointment)
+Standard Work Contract
+وزارة الموارد البشرية
+منصة قوى
+new appointment
+
+2 First Party's Information
+Name: Employer Rep
+ID No.: 1000000001
+
+3 Second Party's Information
 Employee Name: Alex Rivers
 Iqama: 9900000007
 Nationality: Demoland
+
+4 Profession & Work Location
 Profession: Technician
+
+9 Wage & Benefits
+Contract Type: Fixed-term
 Start Date: 2025-01-01
 End Date: 2027-12-31
 Basic Salary: 4,500
-Housing: 1,000
-Transport: 300
-Total: 5,800
-Contract Type: Fixed-term
+Housing Allowance: 1,000
+Transport Allowation: 300
+Total Salary: 5,800
 `;
 
 const SYNTH_OLD_CONTRACT_AR = `
@@ -54,6 +67,17 @@ const SYNTH_OLD_CONTRACT_AR = `
 الراتب الأساسي: 3,500
 بدل السكن: 800
 المجموع: 4,300
+`;
+
+const SYNTH_OLD_CONTRACT_EN = `
+Employment Contract
+Employee Name: Aafaq Ahmed
+Iqama No: 2456678890
+Nationality: Pakistan
+Start Date: 2024-01-01
+End Date: 2026-12-31
+Basic Salary: 2,500
+Total Salary: 3,400
 `;
 
 const SYNTH_SCANNED_PDF = ''; // image-only PDF: extracted text is empty
@@ -89,6 +113,7 @@ describe('PDF parser — template + field extraction', () => {
     expect(r.basicSalary).toBe(4500);
     expect(r.housingAllowance).toBe(1000);
     expect(r.transportAllowance).toBe(300);
+    expect(r.identityNumber).not.toBe('1000000001');
     expect(r.totalSalary).toBe(5800);
     expect(r.extractionConfidence).toBeGreaterThan(0.7);
   });
@@ -100,6 +125,14 @@ describe('PDF parser — template + field extraction', () => {
     expect(r.startDate).toBe('2024-06-01');
     expect(r.endDate).toBe('2026-05-31');
     expect(r.basicSalary).toBe(3500);
+  });
+
+  it('does not misclassify old English contract as new template', async () => {
+    const r = await parseSynth(SYNTH_OLD_CONTRACT_EN);
+    expect(r.templateType).toBe('old_contract');
+    expect(r.identityNumber).toBe('2456678890');
+    expect(r.startDate).toBe('2024-01-01');
+    expect(r.endDate).toBe('2026-12-31');
   });
 
   it('returns low confidence + warnings on a scanned/image PDF (empty text)', async () => {

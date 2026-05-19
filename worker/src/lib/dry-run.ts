@@ -22,6 +22,17 @@ export type DryRunResult = {
   counts: { created: number; updated: number; skipped: number; review: number; error: number };
 };
 
+export async function resolveDryRunItem(
+  env: Env,
+  type: ImportJobType,
+  row: Record<string, unknown>,
+  rowIndex = 0,
+): Promise<ImportPreviewItem> {
+  if (type === 'employees') return resolveEmployeeRow(env, rowIndex, row);
+  if (type === 'contracts') return resolveContractRow(env, rowIndex, row);
+  return resolveInsuranceRow(env, rowIndex, row);
+}
+
 export async function resolveDryRun(
   env: Env,
   type: ImportJobType,
@@ -32,11 +43,11 @@ export async function resolveDryRun(
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i] as Record<string, unknown>;
     if (type === 'employees') {
-      items.push(await resolveEmployeeRow(env, i, row));
+      items.push(await resolveDryRunItem(env, 'employees', row, i));
     } else if (type === 'contracts') {
-      items.push(await resolveContractRow(env, i, row));
+      items.push(await resolveDryRunItem(env, 'contracts', row, i));
     } else {
-      items.push(await resolveInsuranceRow(env, i, row));
+      items.push(await resolveDryRunItem(env, 'insurance', row, i));
     }
   }
 
@@ -143,6 +154,9 @@ async function resolveContractRow(
   const fileHash = strField(row, 'fileHash') ?? strField(row, 'file_hash');
   const templateType = strField(row, 'templateType') ?? strField(row, 'template_type');
   const confidence = numField(row, 'extractionConfidence') ?? numField(row, 'extraction_confidence');
+  const warnings = warningsField(row);
+  const basicSalary = numField(row, 'basicSalary') ?? numField(row, 'basic_salary');
+  const totalSalary = numField(row, 'totalSalary') ?? numField(row, 'total_salary');
 
   if (!identity) {
     return { rowIndex, identityNumber: null, resolvedAction: 'review', reason: 'missing_identity' };
@@ -190,6 +204,32 @@ async function resolveContractRow(
       reason: 'low_confidence_extraction',
     };
   }
+  if (
+    templateType === 'old_contract' &&
+    ((typeof totalSalary === 'number' && totalSalary > 0 && totalSalary < 500) ||
+      (typeof basicSalary === 'number' && basicSalary > 0 && basicSalary < 500))
+  ) {
+    return {
+      rowIndex,
+      identityNumber: identity,
+      resolvedAction: 'review',
+      reason: 'low_confidence_extraction',
+    };
+  }
+  if (
+    warnings.some((w) =>
+      /salary values appear unusually low|name may include adjacent label text|nationality may include adjacent label text|job title may include adjacent label text/i.test(
+        w,
+      ),
+    )
+  ) {
+    return {
+      rowIndex,
+      identityNumber: identity,
+      resolvedAction: 'review',
+      reason: 'low_confidence_extraction',
+    };
+  }
 
   const employee = await findEmployeeByIdentity(env, identity);
   if (!employee) {
@@ -209,7 +249,7 @@ async function resolveContractRow(
     fileHash,
   });
   if (!existing) {
-    return { rowIndex, identityNumber: identity, resolvedAction: 'create' };
+    return { rowIndex, identityNumber: identity, resolvedAction: 'create', targetId: employee.id };
   }
   return {
     rowIndex,
@@ -244,7 +284,8 @@ async function resolveInsuranceRow(
     };
   }
 
-  const matched = identity ? !!(await findEmployeeByIdentity(env, identity)) : false;
+  const employee = identity ? await findEmployeeByIdentity(env, identity) : null;
+  const matched = !!employee;
 
   // Extended match key — IMPORTANT: group medical insurance shares a single
   // policy_number across many employees. Using policy+start alone would
@@ -262,6 +303,7 @@ async function resolveInsuranceRow(
       rowIndex,
       identityNumber: identity ?? null,
       resolvedAction: matched ? 'create' : 'review',
+      ...(matched && employee ? { targetId: employee.id } : {}),
       reason: matched ? undefined : 'unmatched_insurance',
     };
   }
@@ -283,7 +325,18 @@ function strField(row: Record<string, unknown>, key: string): string | undefined
 
 function numField(row: Record<string, unknown>, key: string): number | undefined {
   const v = row[key];
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+function warningsField(row: Record<string, unknown>): string[] {
+  const v = row.warnings ?? row.extractionWarnings;
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is string => typeof x === 'string');
 }
 
 function optStr<K extends string>(row: Record<string, unknown>, [outKey, inKey]: [K, string]) {

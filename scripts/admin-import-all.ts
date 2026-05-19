@@ -941,6 +941,15 @@ async function execBatched(stmts: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  if (process.env.ALLOW_ADMIN_IMPORT_ALL !== '1') {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[import] BLOCKED: scripts/admin-import-all.ts bypasses dry-run/resolver/commit.\n' +
+        'Use the Import Wizard API pipeline instead (upload-raw → upload → dry-run → commit).\n' +
+        'For controlled CLI recovery only, set ALLOW_ADMIN_IMPORT_ALL=1.',
+    );
+    process.exit(1);
+  }
   const arg = process.argv[2] ?? 'all';
   const wantsEmp = arg === 'all' || arg === 'employees';
   const wantsIns = arg === 'all' || arg === 'insurance';

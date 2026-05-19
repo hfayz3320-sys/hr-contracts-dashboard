@@ -23,7 +23,7 @@ import {
   hrPositionCreateRequest, hrPositionPatchRequest,
   hrGradeCreateRequest, hrGradePatchRequest,
 } from '@shared/api-contract';
-import type { HrOrgUnit, HrOrgUnitNode } from '@shared/domain';
+import type { HrOrgUnitNode } from '@shared/domain';
 import {
   listOrgUnits, getOrgUnit, getOrgUnitByCode, insertOrgUnit, updateOrgUnit,
   computeOrgUnitLevel, wouldCreateOrgCycle,
@@ -131,6 +131,7 @@ hrConfigRoutes.post('/api/config/org-units', requireAdmin, async (c) => {
 
 hrConfigRoutes.patch('/api/config/org-units/:id', requireAdmin, async (c) => {
   const id = c.req.param('id');
+  if (!id) return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
   const actor = (await getActorEmail(c)) ?? 'unknown';
   const before = await getOrgUnit(c.env, id);
   if (!before) return c.json({ error: 'NOT_FOUND', message: 'org unit not found' }, 404);
@@ -186,6 +187,7 @@ hrConfigRoutes.post('/api/config/job-titles', requireAdmin, async (c) => {
 
 hrConfigRoutes.patch('/api/config/job-titles/:id', requireAdmin, async (c) => {
   const id = c.req.param('id');
+  if (!id) return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
   const actor = (await getActorEmail(c)) ?? 'unknown';
   const before = await getJobTitle(c.env, id);
   if (!before) return c.json({ error: 'NOT_FOUND', message: 'job title not found' }, 404);
@@ -238,6 +240,7 @@ hrConfigRoutes.post('/api/config/positions', requireAdmin, async (c) => {
 
 hrConfigRoutes.patch('/api/config/positions/:id', requireAdmin, async (c) => {
   const id = c.req.param('id');
+  if (!id) return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
   const actor = (await getActorEmail(c)) ?? 'unknown';
   const before = await getPosition(c.env, id);
   if (!before) return c.json({ error: 'NOT_FOUND', message: 'position not found' }, 404);
@@ -296,6 +299,7 @@ hrConfigRoutes.post('/api/config/grades', requireAdmin, async (c) => {
 
 hrConfigRoutes.patch('/api/config/grades/:id', requireAdmin, async (c) => {
   const id = c.req.param('id');
+  if (!id) return c.json({ error: 'BAD_REQUEST', message: 'Missing id' }, 400);
   const actor = (await getActorEmail(c)) ?? 'unknown';
   const before = await getGrade(c.env, id);
   if (!before) return c.json({ error: 'NOT_FOUND', message: 'grade not found' }, 404);

@@ -123,15 +123,163 @@ export function findAllDates(text: string): string[] {
  * Iqama extractor — tries labelled match first, then falls back to the
  * 10-digit run that starts with 1 or 2 (current Saudi Iqama allocations).
  */
-export function extractIqama(text: string, labels: string[]): string | undefined {
+/**
+ * Extract a 10-digit identity only from labelled fields inside `text`.
+ * Never scans the whole document — use this for employee (Second Party) data.
+ */
+export function extractIqamaScoped(text: string, labels: string[]): string | undefined {
   const labelled = findLabelledValue(text, labels, '\\d{10}');
   if (labelled) return labelled.replace(/\D/g, '');
+  return undefined;
+}
+
+/**
+ * Labelled match first, then last-resort global 10-digit scan.
+ * Safe only when the document has a single identity block (old renewal PDFs).
+ */
+export function extractIqama(text: string, labels: string[]): string | undefined {
+  const scoped = extractIqamaScoped(text, labels);
+  if (scoped) return scoped;
 
   const runs = [...text.matchAll(/\b(\d{10})\b/g)]
     .map((m) => m[1])
     .filter((x): x is string => !!x);
   if (runs.length === 0) return undefined;
   return runs.find((r) => r.startsWith('1') || r.startsWith('2')) ?? runs[runs.length - 1];
+}
+
+/** MoHRSD new template — anchored sections for party-scoped extraction. */
+export type NewContractSections = {
+  contractInfo: string;
+  firstParty: string;
+  secondParty: string;
+  profession: string;
+  wage: string;
+  bank: string;
+};
+
+type SectionAnchor = { key: keyof NewContractSections; patterns: RegExp[] };
+
+const APOS = "['’ʼ`´]";
+
+const NEW_CONTRACT_SECTION_ANCHORS: SectionAnchor[] = [
+  {
+    key: 'contractInfo',
+    patterns: [
+      new RegExp(`\\b1\\s*[.)\\-–:]?\\s*(?:Contract\\s*Information|معلومات\\s*العقد)`, 'iu'),
+      /Contract\s*Information/iu,
+      /معلومات\s*العقد/iu,
+    ],
+  },
+  {
+    key: 'firstParty',
+    patterns: [
+      new RegExp(
+        `\\b2\\s*[.)\\-–:]?\\s*(?:First\\s*Party(?:\\s*${APOS}\\s*s)?\\s*Information|الطرف\\s*الأول|بيانات\\s*الطرف\\s*الأول)`,
+        'iu',
+      ),
+      new RegExp(`First\\s*Party(?:\\s*${APOS}\\s*s)?\\s*Information`, 'iu'),
+      /بيانات\s*الطرف\s*الأول/iu,
+    ],
+  },
+  {
+    key: 'secondParty',
+    patterns: [
+      new RegExp(
+        `\\b3\\s*[.)\\-–:]?\\s*(?:Second\\s*Party(?:\\s*${APOS}\\s*s)?\\s*Information|الطرف\\s*الثاني|بيانات\\s*الطرف\\s*الثاني)`,
+        'iu',
+      ),
+      new RegExp(`Second\\s*Party(?:\\s*${APOS}\\s*s)?\\s*Information`, 'iu'),
+      /بيانات\s*الطرف\s*الثاني/iu,
+    ],
+  },
+  {
+    key: 'profession',
+    patterns: [
+      new RegExp(
+        `\\b4\\s*[.)\\-–:]?\\s*(?:Profession\\s*&\\s*Work\\s*${APOS}?\\s*s?\\s*Location|Profession|المهنة\\s*ومكان\\s*العمل|مكان\\s*العمل)`,
+        'iu',
+      ),
+      new RegExp(`Work\\s*${APOS}?\\s*s?\\s*Location`, 'iu'),
+      /المهنة\s*ومكان\s*العمل/iu,
+    ],
+  },
+  {
+    key: 'wage',
+    patterns: [
+      new RegExp(`\\b9\\s*[.)\\-–:]?\\s*(?:Wage\\s*&\\s*Benefits|Wage|الأجر\\s*والمزايا|الأجر\\s*والمنافع)`, 'iu'),
+      /Wage\s*&\s*Benefits/iu,
+      /الأجر\s*والمزايا/iu,
+    ],
+  },
+  {
+    key: 'bank',
+    patterns: [
+      new RegExp(
+        `\\b10\\s*[.)\\-–:]?\\s*(?:Second\\s*Party(?:\\s*${APOS}\\s*s)?\\s*Bank\\s*Account\\s*Information|Bank\\s*Account|الحساب\\s*البنكي|حساب\\s*البنك)`,
+        'iu',
+      ),
+      new RegExp(`Second\\s*Party(?:\\s*${APOS}\\s*s)?\\s*Bank\\s*Account\\s*Information`, 'iu'),
+      /Bank\s*Account/iu,
+    ],
+  },
+];
+
+function findEarliestIndex(text: string, patterns: RegExp[]): number {
+  let best = -1;
+  for (const re of patterns) {
+    const m = text.search(re);
+    if (m >= 0 && (best < 0 || m < best)) best = m;
+  }
+  return best;
+}
+
+/**
+ * Split a normalised new-contract PDF text into party-scoped regions.
+ * Fields that identify the employee MUST be read from `secondParty` only.
+ */
+export function splitNewContractSections(text: string): NewContractSections {
+  // `unpdf` may merge the whole document into one stream and may emit apostrophe
+  // variants (', ’, ʼ). Normalize only those runes for search so indices remain
+  // stable against the original `text`.
+  const searchText = text.replace(/[’ʼ`´]/g, "'");
+  const hits: { key: keyof NewContractSections; index: number }[] = [];
+  for (const anchor of NEW_CONTRACT_SECTION_ANCHORS) {
+    const index = findEarliestIndex(searchText, anchor.patterns);
+    if (index >= 0) hits.push({ key: anchor.key, index });
+  }
+  hits.sort((a, b) => a.index - b.index);
+
+  const empty = '';
+  const out: NewContractSections = {
+    contractInfo: empty,
+    firstParty: empty,
+    secondParty: empty,
+    profession: empty,
+    wage: empty,
+    bank: empty,
+  };
+  if (hits.length === 0) {
+    // No section markers — treat entire doc as contractInfo only (safe fallback:
+    // new adapter will not global-scan identity).
+    out.contractInfo = text;
+    return out;
+  }
+
+  for (let i = 0; i < hits.length; i++) {
+    const start = hits[i]!.index;
+    const end = i + 1 < hits.length ? hits[i + 1]!.index : text.length;
+    out[hits[i]!.key] = text.slice(start, end);
+  }
+  return out;
+}
+
+/** Saudi IBAN: SA + 22 digits. */
+export function extractIban(text: string): string | undefined {
+  const m = text.match(/\b(SA(?:\s*\d){22})\b/i);
+  if (!m?.[1]) return undefined;
+  const normalized = m[1].replace(/\s+/g, '').toUpperCase();
+  return /^SA\d{22}$/.test(normalized) ? normalized : undefined;
 }
 
 export function normalizeContractText(text: string): string {

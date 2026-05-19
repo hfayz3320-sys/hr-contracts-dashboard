@@ -68,6 +68,10 @@ export function InsuranceDrawer({
       <div className="grid grid-cols-2 gap-4">
         <Field label="Provider">{insurance.provider}</Field>
         <Field label="Policy">{insurance.policyNumber}</Field>
+        <Field label="Member Number">{insurance.memberNumber ?? '—'}</Field>
+        <Field label="Member Name">{insurance.memberName ?? '—'}</Field>
+        <Field label="Plan Class / Category">{insurance.planClass ?? '—'}</Field>
+        <Field label="Nationality">{insurance.nationality ?? '—'}</Field>
         <Field label="Start">{formatDate(insurance.startDate)}</Field>
         <Field label="End">{formatDate(insurance.endDate)}</Field>
         <Field label="Identity Number">

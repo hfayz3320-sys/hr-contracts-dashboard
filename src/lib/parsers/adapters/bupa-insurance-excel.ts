@@ -138,18 +138,61 @@ const HEADER_INDEX = buildHeaderIndex(FIELDS);
 
 const REQUIRED = ['identityNumber', 'policyNumber', 'startDate'] as const;
 
-function addYearISO(isoLike: string): string | undefined {
-  // YYYY-MM-DD | YYYY/MM/DD | DD/MM/YYYY | DD-MM-YYYY
-  const m =
-    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(isoLike) ??
-    /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/.exec(isoLike);
-  if (!m) return undefined;
-  let year: number, month: number, day: number;
-  if (m[1] && m[1].length === 4) {
-    year = Number(m[1]); month = Number(m[2]); day = Number(m[3]);
-  } else {
-    day = Number(m[1]); month = Number(m[2]); year = Number(m[3]);
+const MONTH_MAP: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function toIsoDateLike(value: unknown): string | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Excel serial date (day 1 = 1900-01-01 with Excel leap-year bug).
+    const ms = Math.round((value - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
+  if (typeof value !== 'string') return undefined;
+  const s = value.trim();
+  if (!s) return undefined;
+  // YYYY-MM-DD | YYYY/MM/DD | DD/MM/YYYY | DD-MM-YYYY
+  const numeric =
+    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/.exec(s) ??
+    /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/.exec(s);
+  if (numeric) {
+    let year: number;
+    let month: number;
+    let day: number;
+    if (numeric[1]!.length === 4) {
+      year = Number(numeric[1]);
+      month = Number(numeric[2]);
+      day = Number(numeric[3]);
+    } else {
+      day = Number(numeric[1]);
+      month = Number(numeric[2]);
+      year = Number(numeric[3]);
+    }
+    if (year >= 1900 && year <= 2100 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // 11-Jun-25 / 11 Jun 2025
+  const mmm = /^(\d{1,2})[\s-]([A-Za-z]{3})[\s-](\d{2}|\d{4})$/.exec(s);
+  if (!mmm) return undefined;
+  const day = Number(mmm[1]);
+  const month = MONTH_MAP[mmm[2]!.toLowerCase()];
+  const yy = Number(mmm[3]);
+  const year = mmm[3]!.length === 2 ? 2000 + yy : yy;
+  if (!month || year < 1900 || year > 2100 || day < 1 || day > 31) return undefined;
+  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function addYearISO(isoLike: string): string | undefined {
+  const parsed = toIsoDateLike(isoLike);
+  if (!parsed) return undefined;
+  const [yearS, monthS, dayS] = parsed.split('-');
+  const year = Number(yearS);
+  const month = Number(monthS);
+  const day = Number(dayS);
   const d = new Date(Date.UTC(year + 1, month - 1, day));
   if (Number.isNaN(d.getTime())) return undefined;
   return d.toISOString().slice(0, 10);
@@ -222,6 +265,10 @@ export const BUPA_INSURANCE_EXCEL_ADAPTER: ExcelAdapter = {
 
       // Bupa-specific post-processing.
       if (!mapped.provider) mapped.provider = 'Bupa';
+      const normalizedStart = toIsoDateLike(mapped.startDate);
+      if (normalizedStart) mapped.startDate = normalizedStart;
+      const normalizedEnd = toIsoDateLike(mapped.endDate);
+      if (normalizedEnd) mapped.endDate = normalizedEnd;
       if (typeof mapped.startDate === 'string' && !mapped.endDate) {
         const computed = addYearISO(mapped.startDate);
         if (computed) mapped.endDate = computed;

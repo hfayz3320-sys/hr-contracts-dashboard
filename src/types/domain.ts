@@ -69,6 +69,27 @@ export type Contract = {
   filename: string;
   extractionConfidence?: number;
   notes?: string;
+  basicSalary?: number | null;
+  housingAllowance?: number | null;
+  transportAllowance?: number | null;
+  otherAllowances?: { code: string; name: string; amount: number }[];
+  totalSalary?: number | null;
+  currency?: string;
+  contractNumber?: string | null;
+  executionDate?: string | null;
+  passportNumber?: string | null;
+  gender?: string | null;
+  maritalStatus?: string | null;
+  birthDate?: string | null;
+  occupation?: string | null;
+  workLocation?: string | null;
+  mobile?: string | null;
+  email?: string | null;
+  bankName?: string | null;
+  iban?: string | null;
+  educationLevel?: string | null;
+  speciality?: string | null;
+  extractionWarnings?: string[];
   createdAt: string;
   // Populated when the endpoint is hit with `?includeEmployee=1`.
   employeeSummary?: EmployeeSummary | null;
@@ -89,11 +110,15 @@ export type Insurance = {
    * employees; memberNumber (e.g. BupaID) disambiguates them.
    */
   memberNumber?: string | null;
+  memberName?: string | null;
   provider: string;
+  planClass?: string | null;
+  nationality?: string | null;
   startDate: string;
   endDate: string | null;
   status: InsuranceStatus;
   matched: boolean;
+  reviewFlags?: string[] | null;
   unmatchedReason?: 'no_identity_match' | 'no_employee_number_match' | 'name_only';
   createdAt: string;
   // Populated when the endpoint is hit with `?includeEmployee=1`.

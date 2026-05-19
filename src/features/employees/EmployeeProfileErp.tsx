@@ -593,6 +593,9 @@ function InsuranceSection({ rows }: { rows: Insurance[] }) {
               <div className="mt-0.5 text-[11.5px] text-muted-foreground tabular-nums">
                 Policy <span className="font-mono">{i.policyNumber}</span>
                 {i.memberNumber ? <> · Member <span className="font-mono">{i.memberNumber}</span></> : null}
+                {i.memberName ? <> · Name <span>{i.memberName}</span></> : null}
+                {i.planClass ? <> · Class <span>{i.planClass}</span></> : null}
+                {i.nationality ? <> · Nationality <span>{i.nationality}</span></> : null}
                 {' · '}{formatDate(i.startDate)} → {i.endDate ? formatDate(i.endDate) : '—'}
               </div>
             </div>

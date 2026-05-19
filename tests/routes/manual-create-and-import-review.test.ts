@@ -345,6 +345,53 @@ describe('PATCH /api/import-jobs/:id/items/:itemId — pre-commit corrections', 
     }, env);
     expect(res.status).toBe(403);
   });
+
+  it('PATCH reruns resolver and commit uses updated employee link', async () => {
+    const item = m.tables.import_job_items![0]!;
+    item.identity_number = '2999999999';
+    item.raw_payload = JSON.stringify({
+      identityNumber: '2999999999',
+      contractType: 'permanent',
+      startDate: '2025-01-01',
+      endDate: '2026-01-01',
+      fileHash: 'sha-job-1',
+      filename: 'contract.pdf',
+      basicSalary: 5000,
+    });
+    item.resolved_action = 'review';
+    item.reason = 'unmatched_contract';
+
+    const patchRes = await fetchApp('/api/import-jobs/job_1/items/item_1', {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'X-Dev-Admin-Email': 'admin@mid.local',
+      },
+      body: JSON.stringify({
+        corrections: { identityNumber: '2111111111' },
+      }),
+    }, env);
+    expect(patchRes.status).toBe(200);
+    const patchBody = await patchRes.json() as {
+      item: { resolvedAction: string | null; targetId: string | null; reason: string | null };
+    };
+    expect(patchBody.item.resolvedAction).toBe('create');
+    expect(patchBody.item.targetId).toBe('emp_a');
+    expect(patchBody.item.reason ?? null).toBeNull();
+
+    const commitRes = await fetchApp('/api/imports/commit', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Dev-Admin-Email': 'admin@mid.local',
+      },
+      body: JSON.stringify({ jobId: 'job_1' }),
+    }, env);
+    expect(commitRes.status).toBe(200);
+    expect(m.tables.contracts).toHaveLength(1);
+    expect(m.tables.contracts![0]!.employee_id).toBe('emp_a');
+    expect(m.tables.contracts![0]!.identity_number).toBe('2111111111');
+  });
 });
 
 // ============================================================================
@@ -588,5 +635,67 @@ describe('GET /api/employees/:id — currentContract + currentCompensation', () 
     expect(body.currentCompensation!.monthlyTotal).toBe(7500);
     expect(body.currentCompensation!.currency).toBe('SAR');
     expect(body.currentCompensation!.lines.length).toBe(2);
+  });
+
+  it('returns insurance metadata fields on Employee 360 response', async () => {
+    const m = makeMock({
+      employees: [{
+        id: 'emp_i',
+        identity_number: '2333333333',
+        full_name: 'Insured Employee',
+        full_name_arabic: null,
+        department: null,
+        job_title: null,
+        nationality: null,
+        date_of_birth: null,
+        hire_date: null,
+        mobile: null,
+        notes: null,
+        status: 'active',
+        source_file_id: 'sha-emp',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-01T00:00:00Z',
+      }],
+      insurance_policies: [{
+        id: 'ins_meta',
+        employee_id: 'emp_i',
+        identity_number: '2333333333',
+        policy_number: 'P-100',
+        member_number: 'M-900',
+        provider: 'Bupa',
+        plan_class: 'Class A',
+        nationality: 'Pakistani',
+        member_name: 'Ahmed Zulf',
+        review_flags_json: JSON.stringify(['name_mismatch']),
+        start_date: '2025-01-01',
+        end_date: '2025-12-31',
+        status: 'active',
+        matched: 1,
+        unmatched_reason: null,
+        source_file_id: 'sha-pol',
+        created_at: '2024-01-01T00:00:00Z',
+      }],
+    });
+    const env = buildEnv(m, DEV_ENV);
+    const res = await fetchApp('/api/employees/emp_i', {
+      method: 'GET',
+      headers: { 'X-Dev-Admin-Email': 'admin@mid.local' },
+    }, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      insurance: Array<{
+        memberNumber?: string | null;
+        memberName?: string | null;
+        planClass?: string | null;
+        nationality?: string | null;
+        reviewFlags?: string[] | null;
+      }>;
+    };
+    expect(body.insurance).toHaveLength(1);
+    expect(body.insurance[0]!.memberNumber).toBe('M-900');
+    expect(body.insurance[0]!.memberName).toBe('Ahmed Zulf');
+    expect(body.insurance[0]!.planClass).toBe('Class A');
+    expect(body.insurance[0]!.nationality).toBe('Pakistani');
+    expect(body.insurance[0]!.reviewFlags).toEqual(['name_mismatch']);
   });
 });

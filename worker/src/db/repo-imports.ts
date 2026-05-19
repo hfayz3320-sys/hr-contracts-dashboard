@@ -285,6 +285,38 @@ export async function updateImportJobItemCorrections(
     .run();
 }
 
+export async function updateImportJobItemCorrectionResolution(
+  env: Env,
+  itemId: string,
+  args: {
+    identityNumber: string | null;
+    resolvedAction: string;
+    targetId: string | null;
+    reason: string | null;
+    diff: Record<string, { from: unknown; to: unknown }> | null;
+  },
+): Promise<void> {
+  await env.DB
+    .prepare(
+      `UPDATE import_job_items
+       SET identity_number = ?,
+           resolved_action = ?,
+           target_id = ?,
+           reason = ?,
+           diff = ?
+       WHERE id = ?`,
+    )
+    .bind(
+      args.identityNumber,
+      args.resolvedAction,
+      args.targetId,
+      args.reason,
+      args.diff ? JSON.stringify(args.diff) : null,
+      itemId,
+    )
+    .run();
+}
+
 export async function getImportJobItem(
   env: Env,
   itemId: string,

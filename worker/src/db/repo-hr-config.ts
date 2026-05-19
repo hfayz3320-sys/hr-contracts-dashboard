@@ -150,9 +150,12 @@ export async function computeOrgUnitLevel(env: Env, parentId: string | null): Pr
   // if a cycle ever slips past the application-level guard.
   for (let i = 0; i < 16 && current; i++) {
     level += 1;
-    const r = await env.DB.prepare(`SELECT parent_id FROM hr_org_units WHERE id = ?`).bind(current).first<{ parent_id: string | null }>();
-    if (!r) break;
-    current = r.parent_id;
+    const parentRow: { parent_id: string | null } | null = await env.DB
+      .prepare(`SELECT parent_id FROM hr_org_units WHERE id = ?`)
+      .bind(current)
+      .first<{ parent_id: string | null }>();
+    if (!parentRow) break;
+    current = parentRow.parent_id;
   }
   return level;
 }
@@ -164,9 +167,12 @@ export async function wouldCreateOrgCycle(env: Env, id: string, newParentId: str
   let current: string | null = newParentId;
   for (let i = 0; i < 16 && current; i++) {
     if (current === id) return true;
-    const r = await env.DB.prepare(`SELECT parent_id FROM hr_org_units WHERE id = ?`).bind(current).first<{ parent_id: string | null }>();
-    if (!r) return false;
-    current = r.parent_id;
+    const parentRow: { parent_id: string | null } | null = await env.DB
+      .prepare(`SELECT parent_id FROM hr_org_units WHERE id = ?`)
+      .bind(current)
+      .first<{ parent_id: string | null }>();
+    if (!parentRow) return false;
+    current = parentRow.parent_id;
   }
   return false;
 }

@@ -185,6 +185,38 @@ describe('dry-run resolver — contracts (Phase 8 lifecycle gates)', () => {
     expect(result.items[0]?.reason).toBe('low_confidence_extraction');
   });
 
+  it('old contract with suspiciously low salary → review (low_confidence_extraction)', async () => {
+    const mock = makeMockD1({
+      employees: [
+        { id: 'emp_1', identity_number: '9900000007', full_name: 'X',
+          status: 'active', source_file_id: 's', created_at: NOW, updated_at: NOW },
+      ],
+    });
+    const result = await resolveDryRun(makeEnv(mock.d1), 'contracts', [
+      ctrRow({ templateType: 'old_contract', basicSalary: 48, totalSalary: 53, extractionConfidence: 0.9 }),
+    ]);
+    expect(result.items[0]?.resolvedAction).toBe('review');
+    expect(result.items[0]?.reason).toBe('low_confidence_extraction');
+  });
+
+  it('warning-driven old contract risk signals force review', async () => {
+    const mock = makeMockD1({
+      employees: [
+        { id: 'emp_1', identity_number: '9900000007', full_name: 'X',
+          status: 'active', source_file_id: 's', created_at: NOW, updated_at: NOW },
+      ],
+    });
+    const result = await resolveDryRun(makeEnv(mock.d1), 'contracts', [
+      ctrRow({
+        templateType: 'old_contract',
+        extractionConfidence: 0.9,
+        warnings: ['Employee name may include adjacent label text due OCR merge; review manually.'],
+      }),
+    ]);
+    expect(result.items[0]?.resolvedAction).toBe('review');
+    expect(result.items[0]?.reason).toBe('low_confidence_extraction');
+  });
+
   it('expired-window (endDate < today) but valid duration → NOT review — history is read-time', async () => {
     // Pin the business rule: a contract that ENDED before today is HISTORY,
     // not a defect. The import path treats it as a normal CREATE; the

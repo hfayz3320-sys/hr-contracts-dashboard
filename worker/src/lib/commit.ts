@@ -260,12 +260,30 @@ async function applyContract(
   const employee = await findEmployeeByIdentity(env, identity);
   if (!employee) throw new Error('employee not found for identity ' + identity);
 
-  const basicSalary       = numField(row, 'basicSalary')       ?? numField(row, 'basic_salary')       ?? null;
-  const housingAllowance  = numField(row, 'housingAllowance')  ?? numField(row, 'housing_allowance')  ?? null;
-  const transportAllowance= numField(row, 'transportAllowance')?? numField(row, 'transport_allowance')?? null;
-  const totalSalary       = numField(row, 'totalSalary')       ?? numField(row, 'total_salary')       ?? null;
+  let basicSalary       = numField(row, 'basicSalary')       ?? numField(row, 'basic_salary')       ?? null;
+  let housingAllowance  = numField(row, 'housingAllowance')  ?? numField(row, 'housing_allowance')  ?? null;
+  let transportAllowance= numField(row, 'transportAllowance')?? numField(row, 'transport_allowance')?? null;
+  const otherCash         = numField(row, 'otherCashAllowances') ?? numField(row, 'other_cash_allowances') ?? null;
+  let totalSalary       = numField(row, 'totalSalary')       ?? numField(row, 'total_salary')       ?? null;
   const currency          = strField(row, 'currency') ?? 'SAR';
-  const otherAllowances   = arrayField(row, 'otherAllowances') ?? arrayField(row, 'other_allowances') ?? null;
+  let otherAllowances   = arrayField(row, 'otherAllowances') ?? arrayField(row, 'other_allowances') ?? null;
+  if ((!otherAllowances || otherAllowances.length === 0) && otherCash != null && otherCash > 0) {
+    otherAllowances = [{ code: 'PAY_OTHER', name: 'Other cash allowances', amount: otherCash }];
+  }
+  const extractionWarnings = warningsField(row);
+  const suspiciousSalary = isSuspiciousSalary({
+    templateType: strField(row, 'templateType') ?? strField(row, 'template_type') ?? null,
+    warnings: extractionWarnings,
+    basicSalary,
+    totalSalary,
+  });
+  if (suspiciousSalary) {
+    basicSalary = null;
+    housingAllowance = null;
+    transportAllowance = null;
+    totalSalary = null;
+    otherAllowances = null;
+  }
 
   const input: ContractUpsertInput = {
     employeeId: employee.id,
@@ -286,11 +304,38 @@ async function applyContract(
     otherAllowances: otherAllowances && otherAllowances.length > 0 ? otherAllowances : null,
     totalSalary,
     currency,
+    contractNumber: strField(row, 'contractNumber') ?? strField(row, 'contract_number') ?? null,
+    executionDate: strField(row, 'executionDate') ?? strField(row, 'execution_date') ?? null,
+    passportNumber: strField(row, 'passportNumber') ?? strField(row, 'passport_number') ?? null,
+    gender: strField(row, 'gender') ?? null,
+    maritalStatus: strField(row, 'maritalStatus') ?? strField(row, 'marital_status') ?? null,
+    birthDate: strField(row, 'birthDate') ?? strField(row, 'birth_date') ?? null,
+    occupation: strField(row, 'occupation') ?? null,
+    workLocation: strField(row, 'workLocation') ?? strField(row, 'work_location') ?? null,
+    mobile: strField(row, 'mobile') ?? null,
+    email: strField(row, 'email') ?? null,
+    bankName: strField(row, 'bankName') ?? strField(row, 'bank_name') ?? null,
+    iban: strField(row, 'iban') ?? null,
+    educationLevel: strField(row, 'educationLevel') ?? strField(row, 'education_level') ?? null,
+    speciality: strField(row, 'speciality') ?? strField(row, 'specialty') ?? null,
+    extractionWarnings,
   };
   if (!input.startDate || !input.endDate || !input.fileHash) {
     throw new Error('missing required contract fields');
   }
   const contractId = await insertContract(env, newId('ctr'), input);
+
+  // Enrich employee master with contact fields from the contract when present.
+  await updateEmployeeFields(env, employee.id, {
+    ...(input.mobile ? { mobile: input.mobile } : {}),
+    ...(input.email ? { email: input.email } : {}),
+    ...(input.passportNumber ? { passportNumber: input.passportNumber } : {}),
+    ...(suspiciousSalary ? {} : (strField(row, 'nationality') ? { nationality: strField(row, 'nationality') } : {})),
+    ...(input.birthDate ? { dateOfBirth: input.birthDate } : {}),
+    ...(suspiciousSalary ? {} : (input.occupation || strField(row, 'jobTitle')
+      ? { jobTitle: input.occupation ?? strField(row, 'jobTitle') ?? undefined }
+      : {})),
+  });
 
   // Phase 11 — populate employee_compensation_lines so the Profile's
   // Compensation tab shows the contract's salary breakdown. The lines
@@ -377,6 +422,15 @@ async function applyInsurance(
     policyNumber,
     memberNumber,
     provider: strField(row, 'provider') ?? '',
+    planClass: strField(row, 'planClass') ?? strField(row, 'plan_class') ?? null,
+    nationality: strField(row, 'nationality') ?? null,
+    memberName:
+      strField(row, 'memberName') ??
+      strField(row, 'member_name') ??
+      strField(row, 'fullName') ??
+      strField(row, 'full_name') ??
+      null,
+    reviewFlags: warningsField(row),
     startDate,
     endDate: effectiveEnd,
     status: computedStatus,
@@ -458,6 +512,13 @@ function numField(row: Record<string, unknown>, key: string): number | undefined
   }
   return undefined;
 }
+function warningsField(row: Record<string, unknown>): string[] | null {
+  const v = row.warnings;
+  if (!Array.isArray(v)) return null;
+  const out = v.filter((x): x is string => typeof x === 'string');
+  return out.length > 0 ? out : null;
+}
+
 function arrayField(
   row: Record<string, unknown>,
   key: string,
@@ -475,4 +536,21 @@ function arrayField(
     }
   }
   return out;
+}
+
+function isSuspiciousSalary(args: {
+  templateType: string | null;
+  warnings: string[] | null;
+  basicSalary: number | null;
+  totalSalary: number | null;
+}): boolean {
+  const hasWarning =
+    (args.warnings ?? []).some((w) =>
+      /salary values appear unusually low|adjacent label text/i.test(w),
+    );
+  const lowOldTemplate =
+    args.templateType === 'old_contract' &&
+    ((typeof args.totalSalary === 'number' && args.totalSalary > 0 && args.totalSalary < 500) ||
+      (typeof args.basicSalary === 'number' && args.basicSalary > 0 && args.basicSalary < 500));
+  return hasWarning || lowOldTemplate;
 }
